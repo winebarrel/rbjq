@@ -30,5 +30,6 @@ jobs:
         if: matrix.ruby == '4.0'
         with:
           files: coverage/coverage.xml
+          disable_search: true
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: true
