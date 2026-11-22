@@ -22,9 +22,42 @@ class FunctionsTest < Minitest::Test
       [a, b]
     } }
 
-    assert_equal [[1, 3], [2, 3], [1, 4], [2, 4]], Rbjq.query(0, 'pair(1, 2; 3, 4)', functions: fns)
+    # like jq's `def pair($a; $b)`: the first argument varies slowest
+    assert_equal [[1, 3], [1, 4], [2, 3], [2, 4]], Rbjq.query(0, 'pair(1, 2; 3, 4)', functions: fns)
     assert_equal 4, calls.size
     assert_equal [{ 'a' => 1 }], Rbjq.query({ 'a' => 1 }, 'id(.)', functions: { 'id' => ->(_, v) { v } })
+  end
+
+  def test_argument_order_matches_jq_value_parameters
+    fns = { 'f' => ->(_, a, b) { [a, b] } }
+
+    assert_equal Rbjq.query(0, 'def g($a; $b): [$a, $b]; [g(1,2; 10,20)]'),
+                 Rbjq.query(0, '[f(1,2; 10,20)]', functions: fns)
+  end
+
+  def test_values_cannot_be_mutated
+    mut = { 'mut' => lambda { |x|
+      x['z'] = 1
+      x
+    } }
+    push = { 'push' => lambda { |_, a|
+      a << 2
+      a
+    } }
+
+    assert_raises(FrozenError) { Rbjq.query({ 'a' => 1 }, '. as $o | mut | $o', functions: mut) }
+    assert_raises(FrozenError) { Rbjq.query({ 'a' => [1] }, 'push(.a)', functions: push) }
+    assert_raises(FrozenError) { Rbjq.query('s', 'up', functions: { 'up' => lambda(&:upcase!) }) }
+    # the caller's data is not frozen
+    data = { 'a' => [1] }
+    Rbjq.query(data, 'id', functions: { 'id' => ->(x) { x } })
+
+    refute_predicate data, :frozen?
+    refute_predicate data['a'], :frozen?
+    # returning a modified copy is fine
+    assert_equal [{ 'a' => 1, 'z' => 1 }], Rbjq.query({ 'a' => 1 }, 'add_z', functions: { 'add_z' => lambda { |x|
+      x.merge('z' => 1)
+    } })
   end
 
   def test_global_functions

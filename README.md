@@ -53,7 +53,11 @@ Rbjq.undefine_function('add_n')
 
 - The first parameter is the input; the others are the arguments, given as
   evaluated values like jq's `$x` parameters. When an argument produces
-  several values, the function is called for each combination.
+  several values, the function is called for each combination, with the
+  first argument varying slowest (`f(1,2; 10,20)` is called with `1, 10`,
+  `1, 20`, `2, 10`, `2, 20`).
+- The input and the arguments are deep-frozen copies: a function cannot
+  change jq's values in place (modifying them raises `FrozenError`).
 - The number of jq arguments comes from the callable's arity. For optional or
   rest parameters, give it in the name: `'count/2' => ->(x, *args) { ... }`.
 - A function returns one value. Raise `Rbjq::JQError` to make a jq error that
