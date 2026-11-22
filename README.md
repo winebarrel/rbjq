@@ -1,5 +1,6 @@
 # rbjq
 
+[![Gem Version](https://badge.fury.io/rb/rbjq.svg)](https://badge.fury.io/rb/rbjq)
 [![test](https://github.com/winebarrel/rbjq/actions/workflows/test.yml/badge.svg)](https://github.com/winebarrel/rbjq/actions/workflows/test.yml)
 [![codecov](https://codecov.io/gh/winebarrel/rbjq/graph/badge.svg)](https://codecov.io/gh/winebarrel/rbjq)
 [![AI Generated](https://img.shields.io/badge/AI%20Generated-Claude-orange?logo=anthropic)](https://claude.com/product/claude-code)
