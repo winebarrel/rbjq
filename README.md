@@ -106,7 +106,7 @@ parameter, or `it` on Ruby 3.4 and later).
 | `a and b`, `a or b`, `a \| not` | `a.and(b)`, `a.or(b)`, `a.not` or `!a` |
 | `a, b, c` | `a.comma(b, c)` |
 | `.a // 0` | `r[:a].default(0)` |
-| `[.a, 1]`, `{name: .n, (.k): 1}` | `[r[:a], 1]`, `{ name: r[:n], r[:k] => 1 }` |
+| `[.a, 1]`, `{name: .n, (.k): 1}` | `r.then { [_1[:a], 1] }`, `r.then { { name: _1[:n], _1[:k] => 1 } }` |
 | `"hi \(.name)"` | `"hi #{r[:name]}"` |
 | `select(.age > 30)` | `select { _1[:age] > 30 }` |
 | `limit(3; .[])` | `limit(3) { _1[] }` |
@@ -120,6 +120,27 @@ parameter, or `it` on Ruby 3.4 and later).
 | `.a = 1`, `.a \|= . + 1` | `r[:a].set(1)`, `r[:a].update { _1 + 1 }` |
 | `.a += 1`, `.a //= 0` | `r[:a].update(:+, 1)`, `r[:a].update(:default, 0)` |
 | anything else | `r[:a].jq('to_entries \| from_entries')` |
+
+Objects are Ruby Hashes returned from a block, with Exprs as values (or as
+keys, for computed keys). There is no shorthand like jq's `{a, b}`; write
+each key and value:
+
+```ruby
+r.then { { name: _1[:name], age: _1[:age] } }
+# {name: .name, age: .age}  (jq's {name, age})
+
+r[:users][].then { |u| { name: u[:name], tags: u[:tags].length } }
+# .users[] | {name: .name, tags: (.tags | length)}
+
+r[:users].map { |u| { name: u[:name], adult: u[:age] >= 20 } }
+# .users | map({name: .name, adult: .age >= 20})
+
+r[:users][].then { |u| { u[:name] => u[:age] } }
+# .users[] | {(.name): .age}
+
+r[:users][].then { |u| { name: u[:name], total: r[:total] } }
+# . as $__root | .users[] | {name: .name, total: $__root.total}
+```
 
 - Other methods call the jq function of that name (builtins, `functions:`,
   `Rbjq.define_function`). Arguments are Ruby values (literals), Exprs, or
