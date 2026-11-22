@@ -101,7 +101,3 @@ values.
 bundle install
 bundle exec rake test
 ```
-
-## License
-
-[CC0 1.0 Universal](LICENSE)
