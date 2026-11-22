@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require 'set'
-
 module Rbjq
   # Raised from inside a `try` body's downstream so the try does not catch
   # errors that happen after the body has produced a value.
@@ -46,7 +44,7 @@ module Rbjq
       when :identity
         yield input, path
       when :literal
-        yield node[1], (path && INVALID)
+        yield node[1], path && INVALID
       when :index
         eval_index(node, input, path, env, &blk)
       when :pipe
@@ -69,25 +67,25 @@ module Rbjq
         lhs = node[2]
         each_operand(node[3], input, env) do |r|
           eval_node(lhs, input, nil, env) do |l|
-            yield Ops.binop(op, l, r), (path && INVALID)
+            yield Ops.binop(op, l, r), path && INVALID
           end
         end
       when :and
         rhs = node[2]
         each_operand(node[1], input, env) do |l|
           if Value.truthy?(l)
-            eval_node(rhs, input, nil, env) { |r| yield Value.truthy?(r), (path && INVALID) }
+            eval_node(rhs, input, nil, env) { |r| yield Value.truthy?(r), path && INVALID }
           else
-            yield false, (path && INVALID)
+            yield false, path && INVALID
           end
         end
       when :or
         rhs = node[2]
         each_operand(node[1], input, env) do |l|
           if Value.truthy?(l)
-            yield true, (path && INVALID)
+            yield true, path && INVALID
           else
-            eval_node(rhs, input, nil, env) { |r| yield Value.truthy?(r), (path && INVALID) }
+            eval_node(rhs, input, nil, env) { |r| yield Value.truthy?(r), path && INVALID }
           end
         end
       when :alt
@@ -103,7 +101,7 @@ module Rbjq
         eval_node(node[1], input, nil, env) do |v|
           raise JQError, "#{Value.desc(v)} cannot be negated" unless Value.number?(v)
 
-          yield(v == 0 && v.is_a?(Integer) ? -0.0 : Value.normalize_number(-v), (path && INVALID))
+          yield(v.zero? && v.is_a?(Integer) ? -0.0 : Value.normalize_number(-v), path && INVALID)
         end
       when :if
         cond = node[1]
@@ -119,19 +117,19 @@ module Rbjq
       when :try
         eval_try(node, input, path, env, &blk)
       when :var
-        yield lookup_var(node[1], env), (path && INVALID)
+        yield lookup_var(node[1], env), path && INVALID
       when :as
         eval_as(node, input, path, env, &blk)
       when :array
         arr = []
         eval_node(node[1], input, nil, env) { |v| arr << v } if node[1]
-        yield arr, (path && INVALID)
+        yield arr, path && INVALID
       when :object
-        build_object(node[1], 0, {}, input, env) { |h| yield h, (path && INVALID) }
+        build_object(node[1], 0, {}, input, env) { |h| yield h, path && INVALID }
       when :string
-        eval_string(node[1], node[1].size - 1, '', node[2], input, env) { |s| yield s, (path && INVALID) }
+        eval_string(node[1], node[1].size - 1, '', node[2], input, env) { |s| yield s, path && INVALID }
       when :format
-        yield Formats.apply(node[1], input), (path && INVALID)
+        yield Formats.apply(node[1], input), path && INVALID
       when :reduce
         eval_reduce(node, input, path, env, &blk)
       when :foreach
@@ -153,7 +151,7 @@ module Rbjq
 
         throw l.value
       when :loc
-        yield({ 'file' => '<top-level>', 'line' => node[1] }, (path && INVALID))
+        yield({ 'file' => '<top-level>', 'line' => node[1] }, path && INVALID)
       else
         raise JQError, "unknown node #{node[0]}"
       end
@@ -169,7 +167,7 @@ module Rbjq
     def check_access_path!(t, tp, k)
       return unless tp.equal?(INVALID)
 
-      raise JQError, "Invalid path expression near attempt to access element " \
+      raise JQError, 'Invalid path expression near attempt to access element ' \
                      "#{Value.dump_trunc(k)} of #{Value.dump_trunc(t)}"
     end
 
@@ -179,7 +177,7 @@ module Rbjq
       raise JQError, "Invalid path expression near attempt to iterate through #{Value.dump_trunc(t)}"
     end
 
-    def eval_index(node, input, path, env, &blk)
+    def eval_index(node, input, path, env, &)
       target = node[1]
       key = node[2]
       if key[0] == :literal
@@ -206,7 +204,7 @@ module Rbjq
       end
     end
 
-    def eval_slice(node, input, path, env, &blk)
+    def eval_slice(node, input, path, env, &)
       _, target, from_n, to_n = node
       each_opt(from_n, input, env) do |from|
         each_opt(to_n, input, env) do |to|
@@ -223,11 +221,11 @@ module Rbjq
       end
     end
 
-    def each_opt(node, input, env, &blk)
+    def each_opt(node, input, env, &)
       if node.nil?
         yield nil
       else
-        eval_node(node, input, nil, env, &blk)
+        eval_node(node, input, nil, env, &)
       end
     end
 
@@ -250,7 +248,7 @@ module Rbjq
       end
     end
 
-    def eval_try(node, input, path, env, &blk)
+    def eval_try(node, input, path, env, &)
       body = node[1]
       handler = node[2]
       marker = Object.new
@@ -262,9 +260,9 @@ module Rbjq
         end
       rescue JQError => e
         # the handler's input keeps the path only if it is the try's input itself
-        eval_node(handler, e.value, (path && (e.value.equal?(input) ? path : INVALID)), env, &blk) if handler
-      rescue DownstreamError => d
-        raise d.error if d.marker.equal?(marker)
+        eval_node(handler, e.value, path && (e.value.equal?(input) ? path : INVALID), env, &) if handler
+      rescue DownstreamError => e
+        raise e.error if e.marker.equal?(marker)
 
         raise
       end
@@ -312,8 +310,8 @@ module Rbjq
           break
         rescue JQError
           next
-        rescue DownstreamError => d
-          raise d.error if d.marker.equal?(marker)
+        rescue DownstreamError => e
+          raise e.error if e.marker.equal?(marker)
 
           raise
         end
@@ -331,14 +329,14 @@ module Rbjq
       end
     end
 
-    def bind_pattern(pat, v, input, env, &blk)
+    def bind_pattern(pat, v, input, env, &)
       case pat[0]
       when :pvar
         yield Env.bind_var(env, pat[1], v)
       when :parray
-        bind_array(pat[1], 0, v, input, env, &blk)
+        bind_array(pat[1], 0, v, input, env, &)
       when :pobject
-        bind_object(pat[1], 0, v, input, env, &blk)
+        bind_object(pat[1], 0, v, input, env, &)
       end
     end
 
@@ -347,9 +345,7 @@ module Rbjq
         yield env
         return
       end
-      unless v.nil? || v.is_a?(Array)
-        Ops.index_error(v, i)
-      end
+      Ops.index_error(v, i) unless v.nil? || v.is_a?(Array)
 
       bind_pattern(pats[i], Ops.index(v, i), input, env) do |e2|
         bind_array(pats, i + 1, v, input, e2, &blk)
@@ -435,7 +431,7 @@ module Rbjq
       state.equal?(init) ? init_path : INVALID
     end
 
-    def eval_foreach(node, input, path, env)
+    def eval_foreach(node, input, path, env, &block)
       _, src, patterns, init, update, extract = node
       eval_node(init, input, path, env) do |iv, ip|
         state = iv
@@ -444,7 +440,7 @@ module Rbjq
             eval_node(update, state, state_path(state, iv, ip), e2) do |v, p|
               state = v
               if extract
-                eval_node(extract, v, p, e2) { |ev, ep| yield ev, ep }
+                eval_node(extract, v, p, e2, &block)
               else
                 yield v, p
               end
@@ -488,7 +484,7 @@ module Rbjq
       paths
     end
 
-    def eval_assign(node, input, path, env, &blk)
+    def eval_assign(node, input, path, env, &)
       _, op, lhs, rhs = node
       inv = path && INVALID
       case op
@@ -544,20 +540,20 @@ module Rbjq
 
     # ---------------------------------------------------------- functions
 
-    def call_function(node, input, path, env, &blk)
+    def call_function(node, input, path, env, &)
       key = (node[3] ||= "#{node[1]}/#{node[2].size}")
       e = Env.lookup(env, :func, key)
       if e
         f = e.value
         if f.is_a?(Closure)
-          eval_node(f.node, input, path, f.env, &blk)
+          eval_node(f.node, input, path, f.env, &)
         else
-          call_funcdef(f, node[2], input, path, env, &blk)
+          call_funcdef(f, node[2], input, path, env, &)
         end
       elsif (f = @prelude[key])
-        call_funcdef(f, node[2], input, path, env, &blk)
+        call_funcdef(f, node[2], input, path, env, &)
       elsif (nf = @natives[key])
-        nf.call(self, input, path, node[2], env, &blk)
+        nf.call(self, input, path, node[2], env, &)
       else
         raise JQError, "#{key} is not defined"
       end

@@ -8,16 +8,15 @@ module Rbjq
     WS = /[ \t\r\n]*/
     NUMBER = /-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/
     STR_CHUNK = /[^"\\\x00-\x1f]+/
-    ESCAPES = { '"' => '"', '\\' => '\\', '/' => '/', 'b' => "\b", 'f' => "\f", 'n' => "\n", 'r' => "\r", 't' => "\t" }.freeze
+    ESCAPES = { '"' => '"', '\\' => '\\', '/' => '/', 'b' => "\b", 'f' => "\f", 'n' => "\n", 'r' => "\r",
+                't' => "\t" }.freeze
 
     def self.parse(src)
       p = new(src)
       v = p.next_value
       raise ParseError, "Expected JSON value (while parsing '#{src}')" if v.equal?(EOF)
 
-      unless p.next_value.equal?(EOF)
-        raise ParseError, "Unexpected extra JSON values (while parsing '#{src}')"
-      end
+      raise ParseError, "Unexpected extra JSON values (while parsing '#{src}')" unless p.next_value.equal?(EOF)
 
       v
     end
@@ -41,7 +40,7 @@ module Rbjq
     def initialize(src)
       src = src.dup.force_encoding(Encoding::UTF_8)
       src = Value.scrub_utf8(src) unless src.valid_encoding?
-      src = src.delete_prefix("﻿") # byte order mark
+      src = src.delete_prefix('﻿') # byte order mark
       @src = src
       @s = StringScanner.new(src)
       @counted_pos = 0
@@ -149,11 +148,9 @@ module Rbjq
 
     # jq reports errors in a bare token after reading the delimiter that ends it
     def error_after_token(msg)
-      if @s.eos?
-        error("#{msg} at EOF")
-      else
-        raise ParseError, "#{msg} at line #{line}, column #{column + 1}"
-      end
+      raise ParseError, "#{msg} at line #{line}, column #{column + 1}" unless @s.eos?
+
+      error("#{msg} at EOF")
     end
 
     # jq reports a misplaced token after reading it (and its delimiter)
@@ -287,7 +284,7 @@ module Rbjq
               next
             end
             cp = hex.to_i(16)
-            if cp >= 0xD800 && cp <= 0xDBFF
+            if cp.between?(0xD800, 0xDBFF)
               if @s.match?(/\\u[dD][c-fC-F][0-9a-fA-F]{2}/)
                 lo = @s.scan(/\\u..../)[2..].to_i(16)
                 cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00)
@@ -295,7 +292,7 @@ module Rbjq
                 failure ||= 'Invalid \\uXXXX\\uXXXX surrogate pair escape'
                 next
               end
-            elsif cp >= 0xDC00 && cp <= 0xDFFF
+            elsif cp.between?(0xDC00, 0xDFFF)
               cp = 0xFFFD
             end
             buf << cp.chr(Encoding::UTF_8)
@@ -406,8 +403,8 @@ module Rbjq
       '"' => '\\"', '\\' => '\\\\', "\n" => '\\n', "\t" => '\\t', "\r" => '\\r', "\b" => '\\b', "\f" => '\\f'
     }.freeze
 
-    def self.escape_string(s, ascii = false)
-      s = s.scrub("�") unless s.valid_encoding?
+    def self.escape_string(s, ascii = false) # rubocop:disable Style/OptionalBooleanParameter
+      s = s.scrub('�') unless s.valid_encoding?
       out = s.gsub(/["\\\x00-\x1f\x7f]/) do |c|
         ESCAPE_MAP[c] || format('\\u%04x', c.ord)
       end
@@ -416,7 +413,7 @@ module Rbjq
           cp = c.ord
           if cp >= 0x10000
             cp -= 0x10000
-            format('\\u%04x\\u%04x', 0xD800 + (cp >> 10), 0xDC00 + (cp & 0x3FF))
+            format('\u%<hi>04x\u%<lo>04x', hi: 0xD800 + (cp >> 10), lo: 0xDC00 + (cp & 0x3FF))
           else
             format('\\u%04x', cp)
           end

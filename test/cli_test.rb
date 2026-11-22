@@ -48,9 +48,11 @@ class CLITest < Minitest::Test
 
   def test_colors
     out = cli(['-C', '-c', '.'], '{"a":[1,null,"s"]}')[1]
+
     assert_equal "\e[1;39m{\e[0m\e[1;34m\"a\"\e[0m\e[1;39m:\e[0m\e[1;39m[\e[0m\e[0;39m1\e[0m" \
                  "\e[1;39m,\e[0m\e[0;90mnull\e[0m\e[1;39m,\e[0m\e[0;32m\"s\"\e[0m\e[1;39m]\e[0m\e[1;39m}\e[0m\n", out
     out = cli(['-C', '.'], '[]', env: { 'JQ_COLORS' => '0;31:0;32:0;33:0;34:0;35:4;36' })[1]
+
     assert_equal "\e[4;36m[]\e[0m\n", out
     assert_equal "[]\n", cli(['-M', '.'], '[]')[1]
   end
@@ -58,6 +60,7 @@ class CLITest < Minitest::Test
   def test_inputs
     a = file('a.json', "1\n{\"x\":2}\n")
     b = file('b.json', '"s"')
+
     assert_equal "[1,{\"x\":2},\"s\"]\n", cli(['-c', '-s', '.', a, b])[1]
     assert_equal "\"#{a}\"\n\"#{a}\"\n\"#{b}\"\n", cli(['input_filename', a, b])[1]
     assert_equal "[1,1]\n[{\"x\":2},2]\n", cli(['-c', '[., input_line_number]', a])[1]
@@ -73,6 +76,7 @@ class CLITest < Minitest::Test
   def test_variables
     raw = file('raw.txt', "raw\n")
     json = file('v.json', '1 2')
+
     assert_equal "\"raw\\n\"\n", cli(['-n', '--rawfile', 'r', raw, '$r'])[1]
     assert_equal "[1,2]\n", cli(['-nc', '--slurpfile', 's', json, '$s'])[1]
     assert_equal "{\"positional\":[1,{\"a\":2}],\"named\":{}}\n",
@@ -83,12 +87,14 @@ class CLITest < Minitest::Test
   def test_from_file
     prog = file('prog.jq', "def f: . + 1;\n.a | f")
     data = file('d.json', '{"a":1}')
+
     assert_equal "2\n", cli(['-f', prog, data])[1]
     assert_equal "\"#{@dir}\"\n", cli(['-f', file('o.jq', 'get_prog_origin'), '-n'])[1]
   end
 
   def test_usage_errors
     status, _, err = cli(['-x', '.'])
+
     assert_equal 2, status
     assert_equal "rbjq: Unknown option -x\nUse rbjq --help for help with command-line options,\n" \
                  "or see the jq manpage, or online docs at https://jqlang.org\n", err
@@ -108,6 +114,7 @@ class CLITest < Minitest::Test
     assert_equal 5, cli(['.a'], '{"a":1} "x"')[0]
     assert_equal 5, cli(['-e', '.a'], '{"a":1} "x"')[0]
     status, out, err = cli(['.', File.join(@dir, 'missing.json'), file('one.json', '1')])
+
     assert_equal [2, "1\n"], [status, out]
     assert_match(/Could not open file .*missing.json: No such file or directory/, err)
     assert_equal "rbjq: error (at <unknown>) (not a string): {}\n", cli(['-n', 'error({})'])[2]
@@ -121,12 +128,14 @@ class CLITest < Minitest::Test
 
   def test_seq_input
     status, out, err = cli(['-c', '--seq', '.'], 'x')
+
     assert_equal [0, ''], [status, out]
     assert_match(/ignoring parse error: Unfinished abandoned text/, err)
   end
 
   def test_long_options
     prog = file('p.jq', '.[0]')
+
     assert_equal "\"a\"\n", cli(['--null-input', '--raw-input', 'input'], "a\n")[1]
     assert_equal "[1,2]\n", cli(['--slurp', '--compact-output', '.'], '1 2')[1]
     assert_equal "a\nb\n", cli(['--raw-output', '.[]'], '["a","b"]')[1]
@@ -147,6 +156,7 @@ class CLITest < Minitest::Test
     out = tty.call(StringIO.new)
     err = StringIO.new
     status = Rbjq::CLI.start([], stdin: tty.call(StringIO.new), stdout: out, stderr: err)
+
     assert_equal [2, ''], [status, out.string]
     assert_match(/Usage:/, err.string)
   end
@@ -157,6 +167,7 @@ class CLITest < Minitest::Test
     out.define_singleton_method(:write) { |*| raise Errno::EPIPE }
     err = StringIO.new
     status = Rbjq::CLI.start(['-n', 'range(10)'], stdin: StringIO.new, stdout: out, stderr: err)
+
     assert_equal [0, ''], [status, err.string]
   end
 

@@ -1,0 +1,46 @@
+plugins:
+  - rubocop-minitest
+  - rubocop-rake
+
+AllCops:
+  TargetRubyVersion: 3.2
+  NewCops: enable
+  SuggestExtensions: false
+  Exclude:
+    - 'test/jq/**/*'
+    - 'vendor/**/*'
+    - 'coverage/**/*'
+
+# The evaluator and the builtins are large case analyses by nature.
+Metrics:
+  Enabled: false
+
+# Short names (l, r, k, v, ...) are conventional for operands and values.
+Naming/MethodParameterName:
+  Enabled: false
+
+Minitest/MultipleAssertions:
+  Enabled: false
+
+Style/Documentation:
+  Enabled: false
+
+# Branches of type dispatches often share a body on purpose.
+Lint/DuplicateBranch:
+  Enabled: false
+
+# Exact float comparisons are intended in the numeric code (e.g. expm1).
+Lint/FloatComparison:
+  Enabled: false
+
+# :true / :false name the JSON kinds in the color table.
+Lint/BooleanSymbol:
+  Enabled: false
+
+# lib/rbjq.rb defines the error classes next to the module API.
+Style/OneClassPerFile:
+  Enabled: false
+
+# Constants after `private` are fine; they document where they are used.
+Lint/UselessConstantScoping:
+  Enabled: false

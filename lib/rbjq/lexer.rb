@@ -105,7 +105,7 @@ module Rbjq
         if c == "\n"
           @line += 1
           @pos += 1
-        elsif c == ' ' || c == "\t" || c == "\r"
+        elsif [' ', "\t", "\r"].include?(c)
           @pos += 1
         elsif c == '#'
           @pos += 1 while @pos < @src.length && @src[@pos] != "\n"
@@ -149,13 +149,14 @@ module Rbjq
           when '/' then buf << '/'
           when 'u'
             hex = @src[@pos, 4]
-            error("invalid \\u escape") unless hex&.match?(/\A[0-9a-fA-F]{4}\z/)
+            error('invalid \\u escape') unless hex&.match?(/\A[0-9a-fA-F]{4}\z/)
             @pos += 4
             cp = hex.to_i(16)
-            if cp >= 0xD800 && cp <= 0xDBFF && @src[@pos, 2] == '\\u' && (lo = @src[@pos + 2, 4])&.match?(/\A[dD][c-fC-F][0-9a-fA-F]{2}\z/)
+            lo = @src[@pos + 2, 4] if @src[@pos, 2] == '\\u'
+            if cp.between?(0xD800, 0xDBFF) && lo&.match?(/\A[dD][c-fC-F][0-9a-fA-F]{2}\z/)
               @pos += 6
               cp = 0x10000 + ((cp - 0xD800) << 10) + (lo.to_i(16) - 0xDC00)
-            elsif cp >= 0xD800 && cp <= 0xDFFF
+            elsif cp.between?(0xD800, 0xDFFF)
               cp = 0xFFFD
             end
             buf << cp.chr(Encoding::UTF_8)

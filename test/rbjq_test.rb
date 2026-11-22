@@ -5,8 +5,8 @@ require 'stringio'
 require 'rbjq/cli'
 
 class RbjqTest < Minitest::Test
-  def q(filter, input = nil, **opts)
-    Rbjq.query(input, filter, **opts)
+  def q(filter, input = nil, **)
+    Rbjq.query(input, filter, **)
   end
 
   def test_query_with_ruby_values
@@ -48,7 +48,7 @@ class RbjqTest < Minitest::Test
   # like jq without decNumber, numbers are IEEE 754 doubles
   def test_large_integers_are_doubles
     assert_equal '12345678901234567000', Rbjq.dump_json(q('.', Rbjq.parse_json('12345678901234567890')).first)
-    assert_equal ['9007199254740992'], q('9007199254740993').map { |v| Rbjq.dump_json(v) }
+    assert_equal(['9007199254740992'], q('9007199254740993').map { |v| Rbjq.dump_json(v) })
     assert_equal [false], q('have_decnum')
   end
 
@@ -63,6 +63,7 @@ class RbjqTest < Minitest::Test
 
   def test_inputs
     prog = Rbjq.compile('[., input]')
+
     assert_equal [[1, 2]], prog.run(1, inputs: [2, 3])
     assert_equal [[1, 2, 3]], Rbjq.compile('[inputs]').run(nil, inputs: [1, 2, 3])
   end
@@ -92,9 +93,9 @@ class RbjqTest < Minitest::Test
   end
 
   def test_scrub_utf8_like_jq
-    assert_equal "a�b", Rbjq::Value.scrub_utf8("a\xFFb")
-    assert_equal "�x", Rbjq::Value.scrub_utf8("\xE3\x81x")
-    assert_equal "é�", Rbjq::Value.scrub_utf8("é\xE3\x81")
+    assert_equal 'a�b', Rbjq::Value.scrub_utf8("a\xFFb")
+    assert_equal '�x', Rbjq::Value.scrub_utf8("\xE3\x81x")
+    assert_equal 'é�', Rbjq::Value.scrub_utf8("é\xE3\x81")
     assert_equal 'é', Rbjq::Value.scrub_utf8('é'.b)
   end
 
@@ -132,11 +133,13 @@ class RbjqTest < Minitest::Test
 
   def test_recursive_sum_uses_linear_stack
     tree = (1..12).reduce(1) { |t, _| [t, t] }
+
     assert_equal [4096], q('def s: if type == "array" then (.[0] | s) + (.[1] | s) else . end; s', tree)
   end
 
   def test_large_integer_arithmetic_uses_doubles
     big = Rbjq.parse_json('9007199254740993')
+
     {
       '. + 1' => '9007199254740992', '. - 1' => '9007199254740991', '. + 2 - 2' => '9007199254740992',
       '. % 7' => '4', '. * 1' => '9007199254740992'
@@ -155,6 +158,7 @@ class RbjqTest < Minitest::Test
 
   def test_cli_pretty
     status, out, = cli(['.'], '{"a":[1,{"b":null}]}')
+
     assert_equal 0, status
     assert_equal "{\n  \"a\": [\n    1,\n    {\n      \"b\": null\n    }\n  ]\n}\n", out
   end
@@ -184,6 +188,7 @@ class RbjqTest < Minitest::Test
 
   def test_cli_halt_error_null_prints_nothing
     status, out, err = cli(['-n', 'halt_error'])
+
     assert_equal [5, '', ''], [status, out, err]
   end
 
@@ -201,6 +206,7 @@ class RbjqTest < Minitest::Test
 
   def test_cli_stack_overflow_is_reported
     status, _, err = cli(['-n', 'def f: if . == 0 then 0 else (. - 1 | f) end; 1000000 | f'])
+
     assert_equal 5, status
     assert_match(/stack overflow/, err)
   end

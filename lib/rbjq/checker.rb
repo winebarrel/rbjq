@@ -61,9 +61,7 @@ module Rbjq
         raise CompileError, "$#{node[1]} is not defined" unless s.vars.include?(node[1])
       when :object
         node[1].each do |k, v|
-          if k[0] == :literal && !k[1].is_a?(String)
-            raise CompileError, "Cannot use #{Value.desc(k[1])} as object key"
-          end
+          raise CompileError, "Cannot use #{Value.desc(k[1])} as object key" if k[0] == :literal && !k[1].is_a?(String)
 
           walk(k, s)
           walk(v, s)
@@ -81,11 +79,11 @@ module Rbjq
         fs = s.with_func(key)
         bs = fs
         params.each do |p|
-          if p.start_with?('$')
-            bs = bs.with_func("#{p[1..]}/0").with_vars([p[1..]])
-          else
-            bs = bs.with_func("#{p}/0")
-          end
+          bs = if p.start_with?('$')
+                 bs.with_func("#{p[1..]}/0").with_vars([p[1..]])
+               else
+                 bs.with_func("#{p}/0")
+               end
         end
         walk(body, bs)
         walk(rest, fs)

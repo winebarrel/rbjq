@@ -76,11 +76,9 @@ module Rbjq
       # like jq: decoding stops at the first '=', other characters are errors
       str = s.split('=', 2).first || ''
       raise JQError, "#{Value.desc(s)} is not valid base64 data" if str.match?(%r{[^A-Za-z0-9+/]})
-      if str.length % 4 == 1
-        raise JQError, "#{Value.desc(s)} trailing base64 byte found"
-      end
+      raise JQError, "#{Value.desc(s)} trailing base64 byte found" if str.length % 4 == 1
 
-      str += '=' * ((4 - str.length % 4) % 4)
+      str += '=' * ((4 - (str.length % 4)) % 4)
       out = str.unpack1('m')
       Value.scrub_utf8(out)
     end

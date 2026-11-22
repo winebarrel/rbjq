@@ -22,9 +22,9 @@ module Rbjq
     end
 
     def check_slice_key(k)
-      unless k.key?('start') && k.key?('end')
-        raise JQError, 'Array/string slice indices must be integers'
-      end
+      return if k.key?('start') && k.key?('end')
+
+      raise JQError, 'Array/string slice indices must be integers'
     end
 
     def index(t, k)
@@ -393,9 +393,7 @@ module Rbjq
 
     def divide(l, r)
       if Value.number?(l) && Value.number?(r)
-        if r.zero?
-          raise JQError, "#{Value.desc(l)} and #{Value.desc(r)} cannot be divided because the divisor is zero"
-        end
+        raise JQError, "#{Value.desc(l)} and #{Value.desc(r)} cannot be divided because the divisor is zero" if r.zero?
 
         Value.normalize_number(l.to_f / r)
       elsif l.is_a?(String) && r.is_a?(String)
@@ -412,7 +410,7 @@ module Rbjq
       s.split(Regexp.new(Regexp.escape(sep)), -1)
     end
 
-    INTMAX_MAX = 2**63 - 1
+    INTMAX_MAX = (2**63) - 1
     INTMAX_MIN = -2**63
 
     # jq computes on doubles: integers that a double cannot represent exactly
@@ -433,19 +431,19 @@ module Rbjq
     end
 
     def modulo(l, r)
-      if Value.number?(l) && Value.number?(r)
-        return Float::NAN if (l.is_a?(Float) && l.nan?) || (r.is_a?(Float) && r.nan?)
-
-        a = to_intmax(l)
-        b = to_intmax(r)
-        if b.zero?
-          raise JQError, "#{Value.desc(l)} and #{Value.desc(r)} cannot be divided (remainder) because the divisor is zero"
-        end
-
-        Value.normalize_number(a.remainder(b))
-      else
+      unless Value.number?(l) && Value.number?(r)
         raise JQError, "#{Value.desc(l)} and #{Value.desc(r)} cannot be divided (remainder)"
       end
+      return Float::NAN if (l.is_a?(Float) && l.nan?) || (r.is_a?(Float) && r.nan?)
+
+      a = to_intmax(l)
+      b = to_intmax(r)
+      if b.zero?
+        raise JQError,
+              "#{Value.desc(l)} and #{Value.desc(r)} cannot be divided (remainder) because the divisor is zero"
+      end
+
+      Value.normalize_number(a.remainder(b))
     end
   end
 end

@@ -137,9 +137,9 @@ module Rbjq
       while i < n
         c = bytes.getbyte(i)
         len = if c < 0x80 then 1
-              elsif c >= 0xC2 && c <= 0xDF then 2
-              elsif c >= 0xE0 && c <= 0xEF then 3
-              elsif c >= 0xF0 && c <= 0xF4 then 4
+              elsif c.between?(0xC2, 0xDF) then 2
+              elsif c.between?(0xE0, 0xEF) then 3
+              elsif c.between?(0xF0, 0xF4) then 4
               else 0
               end
         if len.zero?
@@ -169,9 +169,9 @@ module Rbjq
         digits = (int + frac).sub(/\A0+/, '')
         unless digits.empty?
           magnitude = exp.to_i + int.sub(/\A0+/, '').length
-          magnitude = exp.to_i - (frac[/\A0*/].length) if int.sub(/\A0+/, '').empty?
-          return(sign == '-' ? -Float::INFINITY : Float::INFINITY) if magnitude > 400
-          return(sign == '-' ? -0.0 : 0.0) if magnitude < -400
+          magnitude = exp.to_i - frac[/\A0*/].length if int.sub(/\A0+/, '').empty?
+          return (sign == '-' ? -Float::INFINITY : Float::INFINITY) if magnitude > 400
+          return (sign == '-' ? -1 : 1) * 0.0 if magnitude < -400 # keeps the sign of zero
         end
       end
       Float(str)

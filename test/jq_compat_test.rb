@@ -15,6 +15,7 @@ class JqCompatTest < Minitest::Test
       Rbjq::JSONParser.parse_all(input).each do |v|
         prog.each(v) { |o| actual << Rbjq::Encoder.dump(o) }
       end
+
       assert_equal JSON.parse(expected), actual, "filter: #{filter}\ninput: #{input}"
     end
   end

@@ -7,7 +7,7 @@ require_relative 'bessel'
 module Rbjq
   # Builtin functions implemented in Ruby.
   module Builtins
-    NATIVES = {}
+    NATIVES = {} # rubocop:disable Style/MutableConstant -- filled by fn/special below
     INVALID = Interpreter::INVALID
 
     module_function
@@ -37,7 +37,7 @@ module Rbjq
       raise JQError, msg
     end
 
-    def num(v, name = nil)
+    def num(v, _name = nil)
       return v if Value.number?(v)
 
       err("#{Value.desc(v)} number required")
@@ -47,10 +47,10 @@ module Rbjq
 
     special('empty', 0) { |*| nil }
 
-    special('error', 0) { |_i, input, *| raise JQError.new(input) }
+    special('error', 0) { |_i, input, *| raise JQError, input }
 
     special('error', 1) do |interp, input, _path, args, env|
-      interp.each_args(args, input, env) { |(msg)| raise JQError.new(msg) }
+      interp.each_args(args, input, env) { |(msg)| raise JQError, msg } # rubocop:disable Lint/UnreachableLoop
     end
 
     special('not', 0) { |_i, input, path, _a, _e, &blk| blk.call(!Value.truthy?(input), path && INVALID) }
@@ -96,9 +96,9 @@ module Rbjq
         blk.call(v, p)
         case v
         when Array
-          (v.length - 1).downto(0) { |i| stack.push([v[i], p && p + [i]]) }
+          (v.length - 1).downto(0) { |i| stack.push([v[i], p && (p + [i])]) }
         when Hash
-          v.keys.reverse_each { |k| stack.push([v[k], p && p + [k]]) }
+          v.keys.reverse_each { |k| stack.push([v[k], p && (p + [k])]) }
         end
       end
     end
@@ -158,7 +158,7 @@ module Rbjq
           hi = mid - 1
         end
       end
-      found || -1 - lo
+      found || (-1 - lo)
     end
 
     special('while', 2) do |interp, input, path, args, env, &blk|
@@ -174,9 +174,7 @@ module Rbjq
           interp.eval_node(update, v, p, env) { |uv, up| items << [:eval, uv, up] }
         end
         # process in order: emit first, then recurse into each update result
-        work = []
-        items.each { |it| work << it }
-        work.reverse_each do |kind, wv, wp|
+        items.reverse_each do |kind, wv, wp|
           if kind == :emit
             stack.push([:emit, wv, wp])
           else
@@ -208,7 +206,7 @@ module Rbjq
             interp.eval_node(update, v, p, env) { |uv, up| items << [uv, up] }
           end
         end
-        items.reverse_each { |it| stack.push(it) }
+        items.reverse_each { |item| stack.push(item) }
       end
     end
 
@@ -353,7 +351,7 @@ module Rbjq
     special('halt', 0) { |*| raise HaltError.new(nil, 0, false) }
 
     special('halt_error', 1) do |interp, input, _path, args, env|
-      interp.each_args(args, input, env) do |(code)|
+      interp.each_args(args, input, env) do |(code)| # rubocop:disable Lint/UnreachableLoop
         err('halt_error/1: number required') unless Value.number?(code)
         raise HaltError.new(input, code.to_i, true)
       end
@@ -443,9 +441,7 @@ module Rbjq
     end
 
     def contains?(a, b, depth = 0)
-      if (a.is_a?(Hash) || a.is_a?(Array)) && depth > Value::MAX_DEPTH
-        err('Containment check too deep')
-      end
+      err('Containment check too deep') if (a.is_a?(Hash) || a.is_a?(Array)) && depth > Value::MAX_DEPTH
 
       if a.is_a?(Hash) && b.is_a?(Hash)
         b.all? { |k, bv| a.key?(k) && contains?(a[k], bv, depth + 1) }
@@ -531,7 +527,7 @@ module Rbjq
         end
 
         cp = cp.to_i
-        cp = 0xFFFD if cp.negative? || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)
+        cp = 0xFFFD if cp.negative? || cp > 0x10FFFF || cp.between?(0xD800, 0xDFFF)
         cp.chr(Encoding::UTF_8)
       end.join.force_encoding(Encoding::UTF_8)
     end
@@ -619,10 +615,11 @@ module Rbjq
 
     def sort_by_keys(v, keys)
       require_array(v, 'sorted')
-      v.each_with_index.sort do |(_, i), (_, j)|
+      sorted = v.each_with_index.sort do |(_, i), (_, j)|
         c = Value.compare(keys[i], keys[j])
         c.zero? ? i <=> j : c
-      end.map { |(x, i)| [x, keys[i]] }
+      end
+      sorted.map { |(x, i)| [x, keys[i]] }
     end
 
     fn('_sort_by_impl', 1) { |v, keys| sort_by_keys(v, keys).map(&:first) }
@@ -646,11 +643,11 @@ module Rbjq
       last = nil
       first = true
       sort_by_keys(v, keys).each do |x, k|
-        if first || !Value.equal?(last, k)
-          out << x
-          last = k
-          first = false
-        end
+        next unless first || !Value.equal?(last, k)
+
+        out << x
+        last = k
+        first = false
       end
       out
     end
@@ -838,13 +835,37 @@ module Rbjq
     end
 
     MATH1 = {
-      'floor' => ->(x) { x.is_a?(Integer) ? x : (x.finite? ? x.floor.to_f : x) },
-      'ceil' => ->(x) { x.is_a?(Integer) ? x : Builtins.signed(x, x.finite? ? x.ceil.to_f : x) },
-      'round' => ->(x) { x.is_a?(Integer) ? x : Builtins.signed(x, x.finite? ? x.round.to_f : x) },
-      'trunc' => ->(x) { x.is_a?(Integer) ? x : Builtins.signed(x, x.finite? ? x.truncate.to_f : x) },
+      'floor' => lambda { |x|
+        if x.is_a?(Integer)
+          x
+        else
+          (x.finite? ? x.floor.to_f : x)
+        end
+      },
+      'ceil' => lambda { |x|
+        if x.is_a?(Integer)
+          x
+        else
+          Builtins.signed(x, x.finite? ? x.ceil.to_f : x)
+        end
+      },
+      'round' => lambda { |x|
+        if x.is_a?(Integer)
+          x
+        else
+          Builtins.signed(x, x.finite? ? x.round.to_f : x)
+        end
+      },
+      'trunc' => lambda { |x|
+        if x.is_a?(Integer)
+          x
+        else
+          Builtins.signed(x, x.finite? ? x.truncate.to_f : x)
+        end
+      },
       'nearbyint' => ->(x) { x.is_a?(Integer) ? x : Builtins.signed(x, Builtins.round_half_even(x)) },
       'rint' => ->(x) { x.is_a?(Integer) ? x : Builtins.signed(x, Builtins.round_half_even(x)) },
-      'fabs' => ->(x) { x.abs },
+      'fabs' => lambda(&:abs),
       'sqrt' => ->(x) { Math.sqrt(x) },
       'cbrt' => ->(x) { Math.cbrt(x) },
       'exp' => ->(x) { Math.exp(x) },
@@ -861,7 +882,13 @@ module Rbjq
       'log2' => ->(x) { x.zero? ? -Float::INFINITY : Math.log2(x) },
       'log10' => ->(x) { x.zero? ? -Float::INFINITY : Math.log10(x) },
       'log1p' => ->(x) { Builtins.log1p(x.to_f) },
-      'logb' => ->(x) { x.zero? ? -Float::INFINITY : (x.to_f.finite? ? Math.frexp(x)[1] - 1 : x.abs.to_f) },
+      'logb' => lambda { |x|
+        if x.zero?
+          -Float::INFINITY
+        else
+          (x.to_f.finite? ? Math.frexp(x)[1] - 1 : x.abs.to_f)
+        end
+      },
       'significand' => ->(x) { x.zero? || !x.to_f.finite? ? x : Math.frexp(x)[0] * 2 },
       'gamma' => ->(x) { Math.lgamma(x)[0] },
       'lgamma' => ->(x) { Math.lgamma(x)[0] },
@@ -918,28 +945,42 @@ module Rbjq
       'fmax' => ->(a, b) { [a, b].max },
       'fmod' => ->(a, b) { b.zero? ? Float::NAN : a.to_f.remainder(b) },
       'hypot' => ->(a, b) { Math.hypot(a, b) },
-      'copysign' => ->(a, b) { (b.to_f.negative? || (b.to_f.zero? && (1.0 / b.to_f).negative?)) ? -a.to_f.abs : a.to_f.abs },
-      'drem' => ->(a, b) { b.zero? ? Float::NAN : a - b * Builtins.round_half_even(a.to_f / b) },
-      'remainder' => ->(a, b) { b.zero? ? Float::NAN : a - b * Builtins.round_half_even(a.to_f / b) },
+      'copysign' => lambda { |a, b|
+        b.to_f.negative? || (b.to_f.zero? && (1.0 / b.to_f).negative?) ? -a.to_f.abs : a.to_f.abs
+      },
+      'drem' => ->(a, b) { b.zero? ? Float::NAN : a - (b * Builtins.round_half_even(a.to_f / b)) },
+      'remainder' => ->(a, b) { b.zero? ? Float::NAN : a - (b * Builtins.round_half_even(a.to_f / b)) },
       'fdim' => ->(a, b) { a > b ? a - b : 0 },
       'ldexp' => ->(a, b) { Math.ldexp(a, b.to_i) },
       'scalb' => ->(a, b) { a * (2.0**b) },
       'scalbln' => ->(a, b) { Math.ldexp(a, b.to_i) },
-      'nextafter' => ->(a, b) { a == b ? b.to_f : (b > a ? a.to_f.next_float : a.to_f.prev_float) },
-      'nexttoward' => ->(a, b) { a == b ? b.to_f : (b > a ? a.to_f.next_float : a.to_f.prev_float) }
+      'nextafter' => lambda { |a, b|
+        if a == b
+          b.to_f
+        else
+          (b > a ? a.to_f.next_float : a.to_f.prev_float)
+        end
+      },
+      'nexttoward' => lambda { |a, b|
+        if a == b
+          b.to_f
+        else
+          (b > a ? a.to_f.next_float : a.to_f.prev_float)
+        end
+      }
     }.freeze
 
     MATH2.each do |name, f|
       fn(name, 2) { |_v, a, b| mathcall { f.call(num(a), num(b)) } }
     end
 
-    fn('fma', 3) { |_v, a, b, c| mathcall { num(a) * num(b) + num(c) } }
+    fn('fma', 3) { |_v, a, b, c| mathcall { (num(a) * num(b)) + num(c) } }
     fn('jn', 2) { |_v, n, x| mathcall { Bessel.jn(num(n), num(x)) } }
     fn('yn', 2) { |_v, n, x| mathcall { Bessel.yn(num(n), num(x)) } }
 
     # ------------------------------------------------------------- regex
 
-    REGEX_CACHE = {}
+    REGEX_CACHE = {} # rubocop:disable Style/MutableConstant -- a cache
 
     def translate_regex(re)
       out = +''
@@ -985,9 +1026,7 @@ module Rbjq
 
     def compile_regex(re, flags)
       err("#{Value.desc(re)} is not a string") unless re.is_a?(String)
-      unless flags.nil? || flags.is_a?(String)
-        err("#{Value.desc(flags)} is not a string")
-      end
+      err("#{Value.desc(flags)} is not a string") unless flags.nil? || flags.is_a?(String)
 
       key = [re, flags]
       cached = REGEX_CACHE[key]
@@ -1011,7 +1050,7 @@ module Rbjq
       begin
         regexp = Regexp.new(translate_regex(re), opts)
       rescue RegexpError => e
-        err("Regex failure: #{e.message.sub(/: \/.*\z/m, '')}")
+        err("Regex failure: #{e.message.sub(%r{: /.*\z}m, '')}")
       end
       names = {}
       regexp.named_captures.each do |name, idxs|
@@ -1156,10 +1195,10 @@ module Rbjq
     def days_from_civil(y, m, d)
       y -= 1 if m <= 2
       era = (y >= 0 ? y : y - 399) / 400
-      yoe = y - era * 400
-      doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1
-      doe = yoe * 365 + yoe / 4 - yoe / 100 + doy
-      era * 146_097 + doe - 719_468
+      yoe = y - (era * 400)
+      doy = (((153 * (m + (m > 2 ? -3 : 9))) + 2) / 5) + d - 1
+      doe = (yoe * 365) + (yoe / 4) - (yoe / 100) + doy
+      (era * 146_097) + doe - 719_468
     end
 
     # [year, month, mday, hours, minutes, seconds, ...] with missing fields as 0
@@ -1175,7 +1214,7 @@ module Rbjq
       y += mon.div(12)
       mon %= 12
       days = days_from_civil(y, mon + 1, 1) + (d - 1)
-      days * 86_400 + h * 3600 + mi * 60 + s
+      (days * 86_400) + (h * 3600) + (mi * 60) + s
     end
 
     # jq's set_tm_wday / set_tm_yday, which also handle a day of month of 0
@@ -1185,14 +1224,14 @@ module Rbjq
       y -= 1 if mon < 2
       m = mon - 1
       m += 12 if m < 1
-      wday = (mday + (2.6 * m - 0.2).floor + y + (y / 4.0).floor + (century / 4.0).floor - 2 * century).remainder(7)
+      wday = (mday + ((2.6 * m) - 0.2).floor + y + (y / 4.0).floor + (century / 4.0).floor - (2 * century)).remainder(7)
       wday.negative? ? wday + 7 : wday
     end
 
     CUMULATIVE_DAYS = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334].freeze
 
     def tm_yday(year, mon, mday)
-      leap = mon > 1 && ((year % 4).zero? && (year % 100 != 0) || (year % 400).zero?) ? 1 : 0
+      leap = mon > 1 && (((year % 4).zero? && (year % 100 != 0)) || (year % 400).zero?) ? 1 : 0
       CUMULATIVE_DAYS[mon.abs % 12] + leap + mday - 1
     end
 
@@ -1223,9 +1262,7 @@ module Rbjq
     # that jq hands to strftime(3): fields are used as given (not normalized);
     # missing ones are 0 (the year is 1900).
     def strftime_fields(v, name, local)
-      if Value.number?(v)
-        return broken_down(time_from_number(v, local: local)[0]).map { |x| x.floor }
-      end
+      return broken_down(time_from_number(v, local: local)[0]).map(&:floor) if Value.number?(v)
 
       err("#{name} requires parsed datetime inputs") unless v.is_a?(Array)
       err("#{name} requires parsed datetime inputs") unless v.all? { |x| Value.number?(x) }
@@ -1240,7 +1277,7 @@ module Rbjq
 
       t = Time.at(secs)
       t = local ? Time.local(t.utc.year, t.utc.month, t.utc.day, t.utc.hour, t.utc.min, t.utc.sec) : t.utc
-      broken_down(t).map { |x| x.floor }
+      broken_down(t).map(&:floor)
     end
 
     MIN_TIME = -2_208_988_800 # 1900-01-01T00:00:00Z
@@ -1311,7 +1348,7 @@ module Rbjq
     end
 
     fn('strptime', 1) do |v, fmt|
-      err("strptime/1 requires string inputs and arguments") unless v.is_a?(String) && fmt.is_a?(String)
+      err('strptime/1 requires string inputs and arguments') unless v.is_a?(String) && fmt.is_a?(String)
       h = Date._strptime(v, fmt)
       err("date \"#{v}\" does not match format \"#{fmt}\"") if h.nil? || h.key?(:leftover)
       next broken_down(Time.at(h[:seconds]).utc) if h[:seconds]

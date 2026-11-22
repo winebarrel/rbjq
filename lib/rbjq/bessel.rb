@@ -29,7 +29,7 @@ module Rbjq
       m = (x + n).ceil + 40
       h = Math::PI / m
       sum = 0.5 * (1.0 + Math.cos(n * Math::PI))
-      (1...m).each { |i| sum += Math.cos(n * i * h - x * Math.sin(i * h)) }
+      (1...m).each { |i| sum += Math.cos((n * i * h) - (x * Math.sin(i * h))) }
       sum * h / Math::PI
     end
 
@@ -47,7 +47,7 @@ module Rbjq
       a = y0(x)
       b = y1(x)
       (1...n).each do |k|
-        a, b = b, (2.0 * k / x) * b - a
+        a, b = b, ((2.0 * k / x) * b) - a
         break if b.infinite?
       end
       b
@@ -60,7 +60,7 @@ module Rbjq
       return asymptotic_y(0, x) if x > 30
 
       # Y0 = 2/pi (ln(x/2) + gamma) J0 + 2/pi * sum_{k>=1} (-1)^(k+1) H_k (x^2/4)^k / (k!)^2
-      q = Rational(x)**2 / 4
+      q = (Rational(x)**2) / 4
       term = Rational(1)
       harmonic = Rational(0)
       sum = Rational(0)
@@ -73,7 +73,7 @@ module Rbjq
         sum += k.odd? ? t : -t
         break if k > 5 && t.abs < sum.abs * Rational(1, 10**20)
       end
-      2.0 / Math::PI * ((Math.log(x / 2) + EULER) * jn(0, x) + sum.to_f)
+      2.0 / Math::PI * (((Math.log(x / 2) + EULER) * jn(0, x)) + sum.to_f)
     end
 
     def y1(x)
@@ -100,7 +100,7 @@ module Rbjq
         sum += k.even? ? t : -t
         break if k > 5 && t.abs < sum.abs * Rational(1, 10**20)
       end
-      2.0 / Math::PI * (Math.log(x / 2) + EULER) * jn(1, x) - 2.0 / (Math::PI * x) - sum.to_f / Math::PI
+      (2.0 / Math::PI * (Math.log(x / 2) + EULER) * jn(1, x)) - (2.0 / (Math::PI * x)) - (sum.to_f / Math::PI)
     end
 
     # Hankel asymptotic expansion for large x
@@ -111,7 +111,7 @@ module Rbjq
       term = 1.0
       k = 1
       loop do
-        term *= (mu - (2 * k - 1)**2) / (k * 8.0 * x)
+        term *= (mu - (((2 * k) - 1)**2)) / (k * 8.0 * x)
         break if term.abs < 1e-17 || k > 60
 
         if k.odd?
@@ -126,14 +126,14 @@ module Rbjq
 
     def asymptotic_j(n, x)
       p, q = hankel_pq(n, x)
-      w = x - (n / 2.0 + 0.25) * Math::PI
-      Math.sqrt(2.0 / (Math::PI * x)) * (p * Math.cos(w) - q * Math.sin(w))
+      w = x - (((n / 2.0) + 0.25) * Math::PI)
+      Math.sqrt(2.0 / (Math::PI * x)) * ((p * Math.cos(w)) - (q * Math.sin(w)))
     end
 
     def asymptotic_y(n, x)
       p, q = hankel_pq(n, x)
-      w = x - (n / 2.0 + 0.25) * Math::PI
-      Math.sqrt(2.0 / (Math::PI * x)) * (p * Math.sin(w) + q * Math.cos(w))
+      w = x - (((n / 2.0) + 0.25) * Math::PI)
+      Math.sqrt(2.0 / (Math::PI * x)) * ((p * Math.sin(w)) + (q * Math.cos(w)))
     end
   end
 end
