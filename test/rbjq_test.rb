@@ -137,6 +137,12 @@ class RbjqTest < Minitest::Test
     assert_equal "{\"a\":1,\"b\":2}\n", cli(['-Sc', '.'], '{"b":2,"a":1}')[1]
   end
 
+  def test_cli_held_back_operand_output_survives_halt
+    assert_equal [0, "11\n", ''], cli(['-n', 'def f: 1, halt; 10 + f'])
+    assert_equal [5, "11\n", ''], cli(['-n', 'def f: 1, halt_error; 10 + f'])
+    assert_equal [1, "11\n", "bye\n"], cli(['-n', 'def f: 1, ("bye\n" | halt_error(1)); 10 + f'])
+  end
+
   def test_cli_negative_number_filter
     assert_equal "-1\n", cli(['-n', '-1'])[1]
     assert_equal "-1\n", cli(['-n', '-10 % 3'])[1]

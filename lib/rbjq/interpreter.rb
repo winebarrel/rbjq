@@ -648,7 +648,7 @@ module Rbjq
         completed = true
       rescue Exception => e # rubocop:disable Lint/RescueException
         raised = true
-        if pending && e.is_a?(JQError)
+        if pending && (e.is_a?(JQError) || e.is_a?(HaltError))
           pending = false
           yield buffered
         end
