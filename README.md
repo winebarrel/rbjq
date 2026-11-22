@@ -38,6 +38,36 @@ Rbjq.query_json('{"a":1} {"a":2}', '.a') #=> [1, 2]
 Rbjq.compile('[inputs]').run(nil, inputs: [1, 2, 3]) #=> [[1, 2, 3]]
 ```
 
+#### Using another JSON parser
+
+The built-in JSON parser is written in Ruby, so it is slow on large input.
+`query_json` and `parse_json` take `parser:`, any object that responds to
+`call(String)`, to parse the JSON text with something faster instead:
+
+```ruby
+require 'json'
+
+Rbjq.query_json(json, '.users[] | .name', parser: JSON.method(:parse))
+```
+
+On a 570KB document, `JSON.parse` takes about 2.5ms where the built-in
+parser takes about 78ms.
+
+- The parser returns one value, so the JSON text holds one value. With
+  `JSON.parse`, text with several values such as `1 2` is an error.
+- Numbers are converted the way jq reads them (`1.0` is `1`), but other jq
+  extensions are up to the parser: `JSON.parse` rejects `NaN`, and reads
+  `-0` as `0`.
+- `JSON.parse` in json 3.0 and later rejects duplicate keys such as
+  `{"a":1,"a":2}`, and by default it allows 100 levels of nesting where jq
+  allows 10,000. To accept both as jq does (json 2.13 and later):
+
+  ```ruby
+  parser: ->(s) { JSON.parse(s, allow_duplicate_key: true, max_nesting: false) }
+  ```
+- Exceptions from the parser propagate unchanged, such as
+  `JSON::ParserError`, instead of `Rbjq::ParseError`.
+
 #### jq functions in Ruby
 
 You can implement jq functions in Ruby, either for one program or for every
