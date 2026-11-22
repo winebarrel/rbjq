@@ -1,5 +1,8 @@
 # rbjq
 
+[![test](https://github.com/winebarrel/rbjq/actions/workflows/test.yml/badge.svg)](https://github.com/winebarrel/rbjq/actions/workflows/test.yml)
+[![codecov](https://codecov.io/gh/winebarrel/rbjq/graph/badge.svg)](https://codecov.io/gh/winebarrel/rbjq)
+
 A pure Ruby implementation of [jq](https://jqlang.github.io/jq/). It has no
 native extensions and no runtime dependencies, and works both as a library
 and as a jq-compatible command.
