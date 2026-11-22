@@ -37,6 +37,36 @@ Rbjq.query_json('{"a":1} {"a":2}', '.a') #=> [1, 2]
 Rbjq.compile('[inputs]').run(nil, inputs: [1, 2, 3]) #=> [[1, 2, 3]]
 ```
 
+#### jq functions in Ruby
+
+You can implement jq functions in Ruby, either for one program or for every
+program compiled afterwards:
+
+```ruby
+# for one program
+Rbjq.query([1, 2], '.[] | double', functions: { 'double' => ->(x) { x * 2 } }) #=> [2, 4]
+
+# for every program compiled afterwards
+Rbjq.define_function('add_n') { |x, n| x + n }
+Rbjq.query(3, 'add_n(1, 10)') #=> [4, 13]
+Rbjq.undefine_function('add_n')
+```
+
+- The first parameter is the input; the others are the arguments, given as
+  evaluated values like jq's `$x` parameters. When an argument produces
+  several values, the function is called for each combination, with the
+  first argument varying slowest (`f(1,2; 10,20)` is called with `1, 10`,
+  `1, 20`, `2, 10`, `2, 20`).
+- The input and the arguments are deep-frozen copies: a function cannot
+  change jq's values in place (modifying them raises `FrozenError`).
+- The number of jq arguments comes from the callable's arity. For optional or
+  rest parameters, give it in the name: `'count/2' => ->(x, *args) { ... }`.
+- A function returns one value. Raise `Rbjq::JQError` to make a jq error that
+  `try` can catch; other exceptions propagate to the caller.
+- Lookup order: jq definitions (`def`) in the program, then `functions:`,
+  then `Rbjq.define_function`, then the builtins. Functions defined with
+  `Rbjq.define_function` are captured when a program is compiled.
+
 Values are plain Ruby objects (`nil`, `true`, `false`, `Integer`, `Float`,
 `String`, `Array`, `Hash`). Symbol keys are converted to strings.
 

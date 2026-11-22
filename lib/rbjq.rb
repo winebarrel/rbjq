@@ -51,6 +51,7 @@ require_relative 'rbjq/builtins'
 require_relative 'rbjq/prelude'
 require_relative 'rbjq/checker'
 require_relative 'rbjq/program'
+require_relative 'rbjq/functions'
 
 module Rbjq
   class << self
