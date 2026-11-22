@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'test_helper'
+require 'json'
 require 'stringio'
 require 'rbjq/cli'
 
@@ -20,6 +21,19 @@ class RbjqTest < Minitest::Test
 
   def test_query_json
     assert_equal [2, 4], Rbjq.query_json('1 2', '. * 2')
+  end
+
+  def test_query_json_with_parser
+    assert_equal [1, 2], Rbjq.query_json('[1,2]', '.[]', parser: JSON.method(:parse))
+    assert_equal [[1, 100, 1e20]], Rbjq.query_json('[1.0,1e2,100000000000000000001]', '.', parser: JSON.method(:parse))
+    assert_equal [{ 'a' => 2 }], Rbjq.query_json('{"a":1}', '.a += 1', parser: ->(s) { JSON.parse(s) })
+    assert_raises(JSON::ParserError) { Rbjq.query_json('1 2', '.', parser: JSON.method(:parse)) }
+  end
+
+  def test_parse_json_with_parser
+    assert_equal({ 'a' => [1, 100, 1e20] },
+                 Rbjq.parse_json('{"a":[1.0,1e2,100000000000000000001]}', parser: JSON.method(:parse)))
+    assert_raises(JSON::ParserError) { Rbjq.parse_json('{', parser: JSON.method(:parse)) }
   end
 
   def test_compile_errors

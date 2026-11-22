@@ -72,13 +72,21 @@ module Rbjq
 
     # Run a jq filter against JSON text (which may contain several values)
     # and return the outputs as an Array of Ruby values.
-    def query_json(json, filter, vars: {}, **)
+    #
+    # parser: replaces the built-in JSON parser with any object that responds
+    # to call(String) and returns one value, e.g. JSON.method(:parse). Its
+    # exceptions propagate unchanged.
+    def query_json(json, filter, vars: {}, parser: nil, **)
       prog = compile(filter, vars: vars, **)
-      JSONParser.parse_all(json).flat_map { |v| prog.run(v) }
+      values = parser ? [parser.call(json)] : JSONParser.parse_all(json)
+      values.flat_map { |v| prog.run(v) }
     end
 
     # Parse JSON text into Ruby values (jq-compatible numbers).
-    def parse_json(json)
+    # parser: works as in query_json.
+    def parse_json(json, parser: nil)
+      return Program.normalize_value(parser.call(json)) if parser
+
       JSONParser.parse(json)
     end
 
