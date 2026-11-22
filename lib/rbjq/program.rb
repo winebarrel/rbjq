@@ -45,9 +45,16 @@ module Rbjq
     #   (see Rbjq::Functions); they take precedence over functions defined
     #   with Rbjq.define_function, which are captured at this point
     # options: :stderr (IO for debug/stderr), :filename_proc
+    # source: jq source text, or an Rbjq::Expr (then #source is the jq
+    #   source generated from it)
     def initialize(source, vars: {}, functions: {}, **options)
-      @source = source
-      @ast = Parser.parse(source)
+      if defined?(Expr) && Expr === source # rubocop:disable Style/CaseEquality
+        @ast = ExprBuilder.finalize(source.__ast__)
+        @source = Unparser.unparse(@ast)
+      else
+        @source = source
+        @ast = Parser.parse(source)
+      end
       @vars = vars.each_with_object({}) { |(k, v), h| h[k.to_s.delete_prefix('$')] = self.class.normalize_value(v) }
       @functions = Functions.global.merge(Functions.build_all(functions))
       Checker.new(self.class.known_functions | @functions.keys).check(@ast, @vars.keys)
