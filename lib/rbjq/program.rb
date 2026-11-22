@@ -50,14 +50,20 @@ module Rbjq
       @vars = vars.each_with_object({}) { |(k, v), h| h[k.to_s.delete_prefix('$')] = self.class.normalize_value(v) }
       Checker.new(self.class.known_functions).check(@ast, @vars.keys)
       @options = options
+      # Holding back an operand's first output (see Interpreter#each_operand)
+      # would reorder side effects, so keep strict streaming for such programs.
+      @side_effects = calls_any?(@ast, SIDE_EFFECT_CALLS)
     end
+
+    SIDE_EFFECT_CALLS = %w[input inputs debug stderr input_line_number].freeze
 
     # Yields each output for the given input.
     # inputs: an Enumerator/Proc used by `input`/`inputs`.
     def each(input, inputs: nil, &blk)
       return enum_for(:each, input, inputs: inputs) unless blk
 
-      interp = Interpreter.new(prelude: self.class.prelude, natives: Builtins::NATIVES, options: @options)
+      interp = Interpreter.new(prelude: self.class.prelude, natives: Builtins::NATIVES,
+                               options: @options.merge(defer_operands: !@side_effects))
       interp.input_provider = make_provider(inputs) if inputs
       env = nil
       @vars.each { |k, v| env = Env.bind_var(env, k, v) }
@@ -72,7 +78,14 @@ module Rbjq
 
     alias call run
 
-    private
+private
+
+    def calls_any?(node, names)
+      return false unless node.is_a?(Array)
+      return true if node[0] == :call && names.include?(node[1])
+
+      node.any? { |c| c.is_a?(Array) && calls_any?(c, names) }
+    end
 
     def make_provider(inputs)
       case inputs

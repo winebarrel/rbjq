@@ -247,7 +247,7 @@ module Rbjq
       return l if r.nil?
 
       if Value.number?(l) && Value.number?(r)
-        Value.normalize_number(l + r)
+        Value.normalize_number(dbl(l) + dbl(r))
       elsif l.is_a?(String) && r.is_a?(String)
         l + r
       elsif l.is_a?(Array) && r.is_a?(Array)
@@ -261,7 +261,7 @@ module Rbjq
 
     def subtract(l, r)
       if Value.number?(l) && Value.number?(r)
-        Value.normalize_number(l - r)
+        Value.normalize_number(dbl(l) - dbl(r))
       elsif l.is_a?(Array) && r.is_a?(Array)
         l.reject { |x| r.any? { |y| Value.equal?(x, y) } }
       else
@@ -271,7 +271,7 @@ module Rbjq
 
     def multiply(l, r)
       if Value.number?(l) && Value.number?(r)
-        Value.normalize_number(l * r)
+        Value.normalize_number(dbl(l) * dbl(r))
       elsif (l.is_a?(String) && Value.number?(r)) || (Value.number?(l) && r.is_a?(String))
         s, n = l.is_a?(String) ? [l, r] : [r, l]
         return nil if n.is_a?(Float) && n.nan?
@@ -319,10 +319,22 @@ module Rbjq
       s.split(Regexp.new(Regexp.escape(sep)), -1)
     end
 
+    INTMAX_MAX = 2**63 - 1
+    INTMAX_MIN = -2**63
+
+    # jq computes on doubles: integers that a double cannot represent exactly
+    # are converted before the operation, not after.
+    def dbl(n)
+      n.is_a?(Integer) && n.abs > Value::MAX_SAFE ? n.to_f : n
+    end
+
+    # Like jq's dtoi: double -> intmax_t, clamped to the int64 range.
     def to_intmax(n)
+      n = dbl(n)
       return n if n.is_a?(Integer)
       return 0 if n.nan?
-      return(n.positive? ? 2**63 - 1 : -2**63) if n.infinite?
+      return INTMAX_MAX if n >= 9.223372036854775807e18
+      return INTMAX_MIN if n <= -9.223372036854775808e18
 
       n.truncate
     end

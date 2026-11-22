@@ -292,7 +292,9 @@ module Rbjq
       blk.call(interp.current_filename, path && INVALID)
     end
 
-    fn('input_line_number', 0) { |_| 0 }
+    special('input_line_number', 0) do |interp, _input, path, _args, _env, &blk|
+      blk.call(interp.options[:line_proc]&.call || 0, path && INVALID)
+    end
 
     special('halt', 0) { |*| raise HaltError.new(nil, 0, false) }
 

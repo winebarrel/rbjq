@@ -86,6 +86,9 @@ module Rbjq
       0
     rescue Interrupt
       130
+    rescue SystemStackError
+      @stderr.puts 'rbjq: error: stack overflow (the program recursed too deeply)'
+      5
     end
 
     class UsageError < StandardError; end
@@ -114,7 +117,9 @@ module Rbjq
           next
         end
 
-        if a.start_with?('--')
+        if !a.match?(/\A-(?:-|[A-Za-z]|\z)/)
+          positional_arg(a)
+        elsif a.start_with?('--')
           case a
           when '--null-input' then @opts[:null_input] = true
           when '--raw-input' then @opts[:raw_input] = true
@@ -153,7 +158,7 @@ module Rbjq
             end
           when '--slurpfile', '--rawfile'
             name, file = take2(args, a)
-            data = File.read(file)
+            data = read_utf8(file)
             @named[name] = a == '--rawfile' ? data : JSONParser.parse_all(data)
           when '--args' then @rest_kind = :string
           when '--jsonargs' then @rest_kind = :json
@@ -169,7 +174,7 @@ module Rbjq
           else
             raise UsageError, "Unknown option: #{a}"
           end
-        elsif a.start_with?('-') && a.length > 1
+        elsif a.length > 1
           shorts = a[1..].chars
           shorts.each do |c|
             case c
@@ -234,7 +239,7 @@ module Rbjq
 
     def compile
       if @from_file
-        src = File.read(@from_file)
+        src = read_utf8(@from_file)
         # with -f, the first positional (if any) is an input file
         @files.unshift(@filter) if @filter
         @filter = src
@@ -249,7 +254,9 @@ module Rbjq
       vars['ARGS'] = { 'positional' => @positional, 'named' => @named.dup }
       vars['__prog_args'] = @positional
       @current_file = nil
-      Program.new(@filter, vars: vars, stderr: @stderr, filename_proc: -> { @current_file })
+      @current_line = 0
+      Program.new(@filter, vars: vars, stderr: @stderr,
+                           filename_proc: -> { @current_file }, line_proc: -> { @current_line })
     rescue CompileError => e
       @stderr.puts "rbjq: error: #{e.message}"
       @stderr.puts 'rbjq: 1 compile error'
@@ -264,6 +271,10 @@ module Rbjq
       else
         @files.map { |f| [f, nil] }
       end
+    end
+
+    def read_utf8(path)
+      File.read(path, encoding: Encoding::UTF_8).scrub("\uFFFD")
     end
 
     def read_source(name, io)
@@ -283,7 +294,9 @@ module Rbjq
             all = +''
             sources.each do |name, io|
               @current_file = name
+              @read_any = true
               all << read_source(name, io)
+              @current_line = all.count("\n")
             end
             y << all.force_encoding(Encoding::UTF_8).scrub("�")
           else
@@ -293,7 +306,12 @@ module Rbjq
               data = carry + read_source(name, io).force_encoding(Encoding::UTF_8)
               lines = data.split("\n", -1)
               carry = lines.pop || +''
-              lines.each { |l| y << l.scrub("�") }
+              @read_any = true
+              @current_line = 0
+              lines.each do |l|
+                @current_line += 1
+                y << l.scrub("�")
+              end
             end
             y << carry.scrub("�") unless carry.empty?
           end
@@ -316,8 +334,11 @@ module Rbjq
     def each_json(text, &blk)
       text = text.delete("\x1e") if @opts[:seq]
       parser = JSONParser.new(text)
+      @read_any = true
+      @current_line = 0
       loop do
         v = parser.next_value
+        @current_line = parser.line_number
         break if v.equal?(JSONParser::EOF)
 
         if @opts[:stream]
@@ -429,7 +450,7 @@ module Rbjq
       @stderr.puts "rbjq: error (at #{location}): #{e.message}"
       2
     rescue HaltError => e
-      if e.value?
+      if e.value? && !e.value.nil?
         if e.value.is_a?(String)
           @stderr.write(e.value)
         else
@@ -440,7 +461,9 @@ module Rbjq
     end
 
     def location
-      "#{@current_file || '<stdin>'}:0"
+      return '<unknown>' unless @read_any
+
+      "#{@current_file || '<stdin>'}:#{@current_line}"
     end
 
     def print_error(e)

@@ -4,7 +4,7 @@
 # jq programs can recurse deeply; the evaluator uses the Ruby stack, so run it
 # in a thread with a large stack. Thread stack sizes are read from the
 # environment at interpreter start-up, hence the one-time re-exec.
-STACK_SIZE = (256 * 1024 * 1024).to_s
+STACK_SIZE = (1024 * 1024 * 1024).to_s
 unless ENV['RBJQ_STACK_CONFIGURED']
   ENV['RBJQ_STACK_CONFIGURED'] = '1'
   ENV['RUBY_THREAD_VM_STACK_SIZE'] ||= STACK_SIZE

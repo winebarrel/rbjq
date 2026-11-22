@@ -84,6 +84,36 @@ class RbjqTest < Minitest::Test
     assert_equal [[1, 2, 4, 8]], q('[limit(4; 1 | repeat(. * 2))]')
   end
 
+  def test_binop_operands_stay_lazy
+    assert_equal [[0, 1, 2]], q('[limit(3; 0 + range(1e9))]')
+    assert_equal [2], q('first(1 + (1, error("x")))')
+    assert_equal [2], q('label $o | 1 + (1, break $o, 3)')
+    assert_equal [[1], [7, 8]], Rbjq.compile('[limit(1; 0 + (1, input))], [inputs]').run(nil, inputs: [7, 8])
+    assert_equal [2], q('def f: 1, error("y"); first(1 + f)')
+    assert_equal [[11, 'z']], q('def f: 1, error("z"); [try (10 + f) catch .]')
+    assert_equal [[2, 3, 3, 4]], q('def f: 1, 2; [(f) + (f)]')
+    assert_equal [11, 12], q('def f: 1, 2; label $o | 10 + f, break $o')
+    assert_equal [[11], [7, 8]],
+                 Rbjq.compile('def f: (1, input); [limit(1; 10 + f)], [inputs]').run(nil, inputs: [7, 8])
+    assert_equal [0], q('def g: range(1e9); first(0 + g)')
+  end
+
+  def test_recursive_sum_uses_linear_stack
+    tree = (1..12).reduce(1) { |t, _| [t, t] }
+    assert_equal [4096], q('def s: if type == "array" then (.[0] | s) + (.[1] | s) else . end; s', tree)
+  end
+
+  def test_large_integer_arithmetic_uses_doubles
+    big = Rbjq.parse_json('9007199254740993')
+    {
+      '. + 1' => '9007199254740992', '. - 1' => '9007199254740991', '. + 2 - 2' => '9007199254740992',
+      '. % 7' => '4', '. * 1' => '9007199254740992'
+    }.each do |f, expected|
+      assert_equal [expected], q(f, big).map { |v| Rbjq.dump_json(v) }, f
+    end
+    assert_equal [0], q('100000000000000000000000000001 | . % 7')
+  end
+
   def cli(args, stdin = '')
     out = StringIO.new
     err = StringIO.new
@@ -105,6 +135,36 @@ class RbjqTest < Minitest::Test
     assert_equal "[\"p\",\"q\"]\n", cli(['-nc', '$ARGS.positional', '--args', 'p', 'q'])[1]
     assert_equal "\"l1\"\n\"l2\"\n", cli(['-R', '.'], "l1\nl2\n")[1]
     assert_equal "{\"a\":1,\"b\":2}\n", cli(['-Sc', '.'], '{"b":2,"a":1}')[1]
+  end
+
+  def test_cli_negative_number_filter
+    assert_equal "-1\n", cli(['-n', '-1'])[1]
+    assert_equal "-1\n", cli(['-n', '-10 % 3'])[1]
+    assert_equal "5\n", cli(['-5 | abs'], '0')[1]
+    assert_equal 2, cli(['-x', '.'])[0]
+  end
+
+  def test_cli_halt_error_null_prints_nothing
+    status, out, err = cli(['-n', 'halt_error'])
+    assert_equal [5, '', ''], [status, out, err]
+  end
+
+  def test_cli_input_line_number
+    assert_equal "1\n1\n1\n", cli(['input_line_number'], "1 2\n3")[1]
+    assert_equal "1\n4\n", cli(['input_line_number'], "{\"a\":1}\n\n\n{\"b\":2}\n")[1]
+    assert_equal "1\n2\n", cli(['-R', 'input_line_number'], "a\nb\n")[1]
+  end
+
+  def test_cli_error_location
+    assert_equal "rbjq: error (at <stdin>:2): Cannot index number with string \"a\"\n",
+                 cli(['.a'], "{}\n1\n")[2]
+    assert_match(/\(at <unknown>\)/, cli(['-n', '1 | .a'])[2])
+  end
+
+  def test_cli_stack_overflow_is_reported
+    status, _, err = cli(['-n', 'def f: if . == 0 then 0 else (. - 1 | f) end; 1000000 | f'])
+    assert_equal 5, status
+    assert_match(/stack overflow/, err)
   end
 
   def test_cli_exit_status

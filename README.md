@@ -89,11 +89,17 @@ Known differences:
 ### Performance and recursion
 
 Evaluation is a tree-walking interpreter on Ruby blocks. Expect roughly 10x
-the run time of the C jq on large inputs. The `rbjq` command runs with a
-large thread stack so that deeply recursive jq programs work. When you use
-the library with deep recursion, run it in a thread and start Ruby with
-`RUBY_THREAD_VM_STACK_SIZE` and `RUBY_THREAD_MACHINE_STACK_SIZE` set to larger
-values.
+the run time of the C jq on large inputs.
+
+The evaluator uses the Ruby stack, so the maximum recursion depth of a jq
+program depends on the stack size and the platform. The `rbjq` command runs
+with a 1GB thread stack, which is enough for tens of thousands of levels.
+If the stack is exhausted, it reports `stack overflow` and exits with
+status 5. You can change the size with the `RUBY_THREAD_VM_STACK_SIZE` and
+`RUBY_THREAD_MACHINE_STACK_SIZE` environment variables. When you use the
+library with deep recursion, run it in a thread and start Ruby with these
+variables set to larger values. With the default Ruby stack, the limit is
+around 1,000 levels.
 
 ## Development
 

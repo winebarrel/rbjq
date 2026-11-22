@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'set'
+
 module Rbjq
   # Raised from inside a `try` body's downstream so the try does not catch
   # errors that happen after the body has produced a value.
@@ -28,6 +30,7 @@ module Rbjq
       @options = options
       @global_env = nil
       @input_provider = nil
+      @defer_operands = options.fetch(:defer_operands, true)
     end
 
     def run(ast, input, env = @global_env, &blk)
@@ -64,15 +67,14 @@ module Rbjq
       when :binop
         op = node[1]
         lhs = node[2]
-        rights = collect(node[3], input, env)
-        rights.each do |r|
+        each_operand(node[3], input, env) do |r|
           eval_node(lhs, input, nil, env) do |l|
             yield Ops.binop(op, l, r), (path && INVALID)
           end
         end
       when :and
         rhs = node[2]
-        eval_node(node[1], input, nil, env) do |l|
+        each_operand(node[1], input, env) do |l|
           if Value.truthy?(l)
             eval_node(rhs, input, nil, env) { |r| yield Value.truthy?(r), (path && INVALID) }
           else
@@ -81,7 +83,7 @@ module Rbjq
         end
       when :or
         rhs = node[2]
-        eval_node(node[1], input, nil, env) do |l|
+        each_operand(node[1], input, env) do |l|
           if Value.truthy?(l)
             yield true, (path && INVALID)
           else
@@ -366,10 +368,10 @@ module Rbjq
         return
       end
       key_node, val_node = entries[i]
-      eval_node(key_node, input, nil, env) do |k|
+      each_operand(key_node, input, env) do |k|
         raise JQError, "Cannot use #{Value.desc(k)} as object key" unless k.is_a?(String)
 
-        eval_node(val_node, input, nil, env) do |v|
+        each_operand(val_node, input, env) do |v|
           h = acc.dup
           h[k] = v
           build_object(entries, i + 1, h, input, env, &blk)
@@ -386,7 +388,7 @@ module Rbjq
       if part.is_a?(String)
         eval_string(parts, i - 1, part + suffix, fmt, input, env, &blk)
       else
-        eval_node(part, input, nil, env) do |v|
+        each_operand(part, input, env) do |v|
           s = fmt ? Formats.apply(fmt, v) : Ops.tostring(v)
           eval_string(parts, i - 1, s + suffix, fmt, input, env, &blk)
         end
@@ -585,7 +587,7 @@ module Rbjq
         return
       end
       name, node = vps[i]
-      eval_node(node, input, nil, caller_env) do |v|
+      each_operand(node, input, caller_env) do |v|
         bind_value_params(vps, i + 1, input, caller_env, Env.bind_var(env, name, v), &blk)
       end
     end
@@ -597,8 +599,94 @@ module Rbjq
         yield acc
         return
       end
-      collect(args[i], input, env).each do |v|
+      each_operand(args[i], input, env) do |v|
         each_args(args, input, env, i - 1, [v] + acc, &blk)
+      end
+    end
+
+    # Calls whose outputs should always be streamed (generators / side effects).
+    STREAMING_CALLS = %w[
+      range recurse repeat while until limit first input inputs debug stderr empty error
+    ].to_set.freeze
+
+    # Evaluates an operand whose outputs drive an outer loop.
+    #
+    # Running the consumer inside the operand's yield stacks the consumer's
+    # frames on top of the operand's, so code such as
+    # `(. - 1 | f) + (. - 2 | f)` would need stack exponential in the
+    # recursion depth. For operands that end in a function call, the first
+    # output is held back until either the operand finishes (the common
+    # single-output case, consumed after the operand's frames are gone) or a
+    # second output arrives (from then on everything is streamed). On an
+    # error or a break, the held-back output is consumed first, so jq's
+    # output order is preserved.
+    def each_operand(node, input, env)
+      unless @defer_operands && deferrable?(node)
+        eval_node(node, input, nil, env) { |v, _| yield v }
+        return
+      end
+
+      pending = false
+      buffered = nil
+      streaming = false
+      completed = false
+      raised = false
+      begin
+        eval_node(node, input, nil, env) do |v, _|
+          if streaming
+            yield v
+          elsif pending
+            streaming = true
+            pending = false
+            yield buffered
+            yield v
+          else
+            buffered = v
+            pending = true
+          end
+        end
+        completed = true
+      rescue Exception => e # rubocop:disable Lint/RescueException
+        raised = true
+        if pending && e.is_a?(JQError)
+          pending = false
+          yield buffered
+        end
+        raise
+      ensure
+        # normal completion, or unwinding by throw (label/break, limit, first)
+        if pending && (completed || !raised)
+          pending = false
+          yield buffered
+        end
+      end
+    end
+
+    def deferrable?(node)
+      cache = (@deferrable ||= {}.compare_by_identity)
+      return cache[node] if cache.key?(node)
+
+      cache[node] =
+        case node[0]
+        when :call then !STREAMING_CALLS.include?(node[1])
+        when :pipe then single?(node[1]) && deferrable?(node[2])
+        else false
+        end
+    end
+
+    # Statically known to produce exactly one output (or an error).
+    def single?(node)
+      case node[0]
+      when :literal, :var, :identity, :loc, :format, :array then true
+      when :index then single?(node[1]) && single?(node[2])
+      when :slice then single?(node[1]) && (node[2].nil? || single?(node[2])) && (node[3].nil? || single?(node[3]))
+      when :binop then single?(node[2]) && single?(node[3])
+      when :neg then single?(node[1])
+      when :and, :or then single?(node[1]) && single?(node[2])
+      when :object then node[1].all? { |k, v| single?(k) && single?(v) }
+      when :string then node[1].all? { |p| p.is_a?(String) || single?(p) }
+      when :pipe then single?(node[1]) && single?(node[2])
+      else false
       end
     end
 

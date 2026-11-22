@@ -11,6 +11,8 @@ module Rbjq
     COMPARE_OPS = %i[== != < <= > >=].freeze
 
     def self.parse(src)
+      src = src.dup.force_encoding(Encoding::UTF_8) unless src.encoding == Encoding::UTF_8
+      src = src.scrub("\uFFFD") unless src.valid_encoding?
       tokens = Lexer.new(src).tokenize
       parser = new(tokens)
       ast = parser.parse_program

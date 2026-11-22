@@ -43,7 +43,15 @@ module Rbjq
       src = src.scrub("�") unless src.valid_encoding?
       @src = src
       @s = StringScanner.new(src)
+      @counted_pos = 0
+      @counted_lines = 0
+      @line_number = 0
     end
+
+    # Line number as reported by jq's input_line_number: jq reads its input
+    # line by line, so this is the number of newlines up to and including the
+    # end of the line on which the last parsed value ended.
+    attr_reader :line_number
 
     # Returns the next value or EOF
     def next_value
@@ -51,6 +59,8 @@ module Rbjq
       return EOF if @s.eos?
 
       v = parse_value
+      nl = @src.byteindex("\n", @s.pos)
+      @line_number = count_lines_upto(nl ? nl + 1 : @src.bytesize)
       v
     end
 
@@ -59,6 +69,14 @@ module Rbjq
     end
 
     private
+
+    def count_lines_upto(pos)
+      if pos > @counted_pos
+        @counted_lines += @src.byteslice(@counted_pos, pos - @counted_pos).count("\n")
+        @counted_pos = pos
+      end
+      @counted_lines
+    end
 
     def error(msg)
       raise ParseError, "#{msg} at line #{line}, column #{column}"
