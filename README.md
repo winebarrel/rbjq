@@ -132,7 +132,7 @@ parameter, or `it` on Ruby 3.4 and later).
 | `.["a", "b"]` (outputs `.a`, then `.b`) | `r[:a, :b]` (`r.then { [_1[:a, :b]] }` for `[.a, .b]`) |
 | `.[1:3]` | `r[1..2]`, `r[1...3]`, `r.slice(1, 3)` |
 | `.a \| f` | `r[:a].f` |
-| `.a \| [.b, .c]` | `r[:a].then { [_1[:b], _1[:c]] }` |
+| `.a \| [.b, .c]` | `r[:a].then { [_1[:b], _1[:c]] }`, `r[:a].then { [_1[:b, :c]] }` |
 | `.a + 1`, `.a > 1`, `-.a` | `r[:a] + 1`, `r[:a] > 1`, `-r[:a]` |
 | `a and b`, `a or b`, `a \| not` | `a.and(b)`, `a.or(b)`, `a.not` or `!a` |
 | `a, b, c` | `a.comma(b, c)` |
