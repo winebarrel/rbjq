@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require 'set'
-
 module Rbjq
   # A compiled jq program.
   class Program

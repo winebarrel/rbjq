@@ -50,7 +50,7 @@ class UpstreamTest < Minitest::Test
     define_method(:test_jq_test_suite) { skip "jq's test suite is not downloaded; run `rake jq:download`" }
   end
 
-  Dir[File.join(DIR, '*.test')].sort.each do |path|
+  Dir[File.join(DIR, '*.test')].each do |path|
     JqTestFile.parse(path).each do |c|
       name = "test_#{c.file.sub('.test', '')}_line_#{format('%04d', c.line)}"
       define_method(name) do
@@ -81,7 +81,8 @@ class UpstreamTest < Minitest::Test
       error = e
     end
     msg = "#{c.file}:#{c.line}: #{c.program}\ninput: #{c.input}\n" \
-          "actual: #{Rbjq.dump_json(actual)}#{error ? "\nerror: #{error.message}" : ''}"
+          "actual: #{Rbjq.dump_json(actual)}#{"\nerror: #{error.message}" if error}"
+
     assert Rbjq::Value.equal?(expected, actual), msg
   end
 end

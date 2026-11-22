@@ -193,11 +193,11 @@ module Rbjq
             when 'h'
               @stdout.puts USAGE
               @done = true
-              return
+              return # rubocop:disable Lint/NonLocalExitFromIterator
             when 'V'
               @stdout.puts "rbjq-#{VERSION}"
               @done = true
-              return
+              return # rubocop:disable Lint/NonLocalExitFromIterator
             else
               raise UsageError, "Unknown option #{a}"
             end
@@ -256,7 +256,8 @@ module Rbjq
       @current_file = nil
       @current_line = 0
       Program.new(@filter, vars: vars, stderr: @stderr,
-                           filename_proc: -> { @read_any ? (@current_file || '<stdin>') : nil }, line_proc: -> { @current_line },
+                           filename_proc: -> { @read_any ? (@current_file || '<stdin>') : nil },
+                           line_proc: -> { @current_line },
                            jq_origin: File.expand_path('../../exe', __dir__),
                            prog_origin: @from_file ? File.dirname(File.expand_path(@from_file)) : Dir.pwd)
     rescue CompileError => e
@@ -380,7 +381,7 @@ module Rbjq
       end
     end
 
-    def stream_events(v, path, top, &blk)
+    def stream_events(v, path, _top, &blk)
       case v
       when Array
         if v.empty?
@@ -420,7 +421,7 @@ module Rbjq
       tab = !@opts[:compact] && (@opts[:tab] || @opts[:indent] == -1)
       indent = @opts[:indent].clamp(0, 7)
       Encoder.new(indent: indent, tab: tab, sort_keys: @opts[:sort_keys], ascii: @opts[:ascii],
-                  color: color?, colors: Encoder.parse_colors(ENV['JQ_COLORS']), pretty: !@opts[:compact])
+                  color: color?, colors: Encoder.parse_colors(ENV.fetch('JQ_COLORS', nil)), pretty: !@opts[:compact])
     end
 
     def process(prog)
@@ -464,8 +465,8 @@ module Rbjq
         run_one.call(nil)
       else
         loop do
-          v = begin
-            provider.call
+          begin
+            v = provider.call
           rescue ParseError => e
             @stderr.puts "rbjq: parse error: #{e.message}"
             return 5

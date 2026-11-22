@@ -58,21 +58,21 @@ module Rbjq
     #
     #   prog = Rbjq.compile('.[] | select(.age > $min)', vars: { 'min' => 20 })
     #   prog.run(data) #=> [...]
-    def compile(filter, vars: {}, **opts)
-      Program.new(filter, vars: vars, **opts)
+    def compile(filter, vars: {}, **)
+      Program.new(filter, vars: vars, **)
     end
 
     # Run a jq filter against a Ruby value and return all outputs as an Array.
     #
     #   Rbjq.query({ 'a' => [1, 2] }, '.a[]') #=> [1, 2]
-    def query(input, filter, vars: {}, **opts)
-      compile(filter, vars: vars, **opts).run(input)
+    def query(input, filter, vars: {}, **)
+      compile(filter, vars: vars, **).run(input)
     end
 
     # Run a jq filter against JSON text (which may contain several values)
     # and return the outputs as an Array of Ruby values.
-    def query_json(json, filter, vars: {}, **opts)
-      prog = compile(filter, vars: vars, **opts)
+    def query_json(json, filter, vars: {}, **)
+      prog = compile(filter, vars: vars, **)
       JSONParser.parse_all(json).flat_map { |v| prog.run(v) }
     end
 

@@ -7,7 +7,7 @@ module Rbjq
   #   def / as / label  <  |  <  ,  <  //  <  = |= += ...  <  or  <  and
   #   <  == != < <= > >=  <  + -  <  * / %  <  unary -  <  postfix (?, [], .foo)
   class Parser
-    ASSIGN_OPS = %i[= |= += -= *= /= %= //=].freeze
+    ASSIGN_OPS = %i[= |= += -= *= /= %= //=].freeze # rubocop:disable Lint/NestedPercentLiteral
     COMPARE_OPS = %i[== != < <= > >=].freeze
 
     def self.parse(src)
@@ -15,8 +15,7 @@ module Rbjq
       src = src.scrub("\uFFFD") unless src.valid_encoding?
       tokens = Lexer.new(src).tokenize
       parser = new(tokens)
-      ast = parser.parse_program
-      ast
+      parser.parse_program
     end
 
     def initialize(tokens)
@@ -63,9 +62,7 @@ module Rbjq
 
     def expect(type)
       t = peek
-      unless t.type == type
-        raise CompileError, "syntax error, unexpected #{t} (expecting #{type}) at line #{t.line}"
-      end
+      raise CompileError, "syntax error, unexpected #{t} (expecting #{type}) at line #{t.line}" unless t.type == type
 
       advance
     end
@@ -76,9 +73,7 @@ module Rbjq
     end
 
     def skip_module_directives
-      while %i[import include].include?(peek.type)
-        raise CompileError, 'import/include is not supported'
-      end
+      raise CompileError, 'import/include is not supported' if %i[import include].include?(peek.type)
       return unless peek.type == :ident && peek.value == 'module'
 
       raise CompileError, 'module directive is not supported'
@@ -181,9 +176,7 @@ module Rbjq
         op = advance.type
         rhs = parse_additive
         lhs = [:binop, op, lhs, rhs]
-        if COMPARE_OPS.include?(peek.type)
-          raise CompileError, "syntax error, unexpected #{peek} at line #{peek.line}"
-        end
+        raise CompileError, "syntax error, unexpected #{peek} at line #{peek.line}" if COMPARE_OPS.include?(peek.type)
       end
       lhs
     end
@@ -267,9 +260,7 @@ module Rbjq
 
       idx = parse_pipe
       if accept(:':')
-        if accept(:']')
-          return [:slice, term, idx, nil]
-        end
+        return [:slice, term, idx, nil] if accept(:']')
 
         to = parse_pipe
         expect(:']')
@@ -330,7 +321,7 @@ module Rbjq
         end
       when :'{'
         parse_object
-      when :'-'
+      when :-
         advance
         [:neg, parse_postfix]
       when :if

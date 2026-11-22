@@ -59,6 +59,9 @@ Rake::TestTask.new(:test) do |t|
   t.test_files = FileList['test/**/*_test.rb']
 end
 
+desc 'Run tests (downloads jq
+task default: :test
+s test suite first)'
 task test: 'jq:download'
 
 task default: :test

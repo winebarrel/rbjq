@@ -537,3 +537,24 @@ null
 [.[] | try ("\(.)" | test("(")) catch .]
 [1]
 ["Regex failure: end pattern with unmatched parenthesis"]
+
+[infinite, -infinite] | map([floor, ceil, round, trunc, logb, significand] | map(isinfinite))
+null
+[[true,true,true,true,true,true],[true,true,true,true,true,true]]
+
+[0, -8] | map(logb)
+null
+[-1.7976931348623157e+308,3]
+
+[copysign(3; 2), copysign(-3; 2), copysign(3; -1)], [drem(1; 0), remainder(1; 0), fmod(1; 0)] | map(if isnan then "nan" else . end)
+null
+[3,3,-3]
+["nan","nan","nan"]
+
+[nextafter(2; 1) < 2, nextafter(1; 1), nexttoward(1; 1), nexttoward(1; 2) > 1]
+null
+[true,1,1,true]
+
+[-1e400 | isinfinite]
+null
+[true]

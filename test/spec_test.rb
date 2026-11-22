@@ -24,7 +24,7 @@ class SpecTest < Minitest::Test
     ENV['TZ'] = @tz
   end
 
-  Dir[File.join(DIR, '*.test')].sort.each do |path|
+  Dir[File.join(DIR, '*.test')].each do |path|
     JqTestFile.parse(path).each do |c|
       define_method("test_#{c.file.sub('.test', '')}_line_#{format('%04d', c.line)}") do
         expected = c.outputs.map { |o| Rbjq.dump_json(Rbjq.parse_json(o)) }
@@ -37,7 +37,8 @@ class SpecTest < Minitest::Test
           error = e
         end
         msg = "#{c.file}:#{c.line}: #{c.program}\ninput: #{c.input}" \
-              "#{error ? "\nerror: #{error.message}" : ''}"
+              "#{"\nerror: #{error.message}" if error}"
+
         assert_equal expected, actual, msg
       end
     end
