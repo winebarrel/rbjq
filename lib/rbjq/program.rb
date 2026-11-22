@@ -78,7 +78,7 @@ module Rbjq
 
     alias call run
 
-private
+    private
 
     def calls_any?(node, names)
       return false unless node.is_a?(Array)
