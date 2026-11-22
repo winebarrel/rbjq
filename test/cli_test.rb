@@ -151,6 +151,15 @@ class CLITest < Minitest::Test
     assert_match(/Usage:/, err.string)
   end
 
+  # e.g. `rbjq ... | head`: a closed pipe ends quietly with status 0
+  def test_broken_pipe
+    out = StringIO.new
+    out.define_singleton_method(:write) { |*| raise Errno::EPIPE }
+    err = StringIO.new
+    status = Rbjq::CLI.start(['-n', 'range(10)'], stdin: StringIO.new, stdout: out, stderr: err)
+    assert_equal [0, ''], [status, err.string]
+  end
+
   def test_double_dash_and_library_options
     assert_equal "1\n", cli(['-n', '--', '1'])[1]
     assert_equal "1\n", cli(['-L', @dir, '-n', '1'])[1]

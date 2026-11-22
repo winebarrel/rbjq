@@ -2,6 +2,7 @@
 
 require_relative 'test_helper'
 require_relative 'support/jq_test_file'
+require 'stringio'
 
 # Runs jq's own test suite (test/jq/*.test from jq 1.8.2, downloaded by
 # `rake jq:download`, which `rake test` runs first).
@@ -75,7 +76,7 @@ class UpstreamTest < Minitest::Test
     expected = c.outputs.map { |o| Rbjq.parse_json(o) }
     actual = []
     begin
-      Rbjq.compile(c.program).each(Rbjq.parse_json(c.input)) { |v| actual << v }
+      Rbjq.compile(c.program, stderr: StringIO.new).each(Rbjq.parse_json(c.input)) { |v| actual << v }
     rescue Rbjq::JQError => e
       error = e
     end

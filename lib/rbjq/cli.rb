@@ -79,11 +79,11 @@ module Rbjq
       @stderr.puts 'Use rbjq --help for help with command-line options,'
       @stderr.puts 'or see the jq manpage, or online docs at https://jqlang.org'
       2
+    rescue Errno::EPIPE # must come before SystemCallError, its superclass
+      0
     rescue SystemCallError => e
       @stderr.puts "rbjq: error: Could not open #{e.message}"
       2
-    rescue Errno::EPIPE
-      0
     rescue Interrupt
       130
     rescue SystemStackError

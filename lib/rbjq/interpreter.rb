@@ -165,18 +165,18 @@ module Rbjq
       raise JQError, "Invalid path expression with result #{Value.dump_trunc(v)}"
     end
 
-    # Messages follow jq (key truncated to 11 bytes, value to 26)
+    # Messages follow jq; values are shortened like other error messages
     def check_access_path!(t, tp, k)
       return unless tp.equal?(INVALID)
 
       raise JQError, "Invalid path expression near attempt to access element " \
-                     "#{Value.dump_trunc(k)} of #{Value.dump_trunc(t, 26)}"
+                     "#{Value.dump_trunc(k)} of #{Value.dump_trunc(t)}"
     end
 
     def check_iterate_path!(t, tp)
       return unless tp.equal?(INVALID)
 
-      raise JQError, "Invalid path expression near attempt to iterate through #{Value.dump_trunc(t, 26)}"
+      raise JQError, "Invalid path expression near attempt to iterate through #{Value.dump_trunc(t)}"
     end
 
     def eval_index(node, input, path, env, &blk)

@@ -111,7 +111,7 @@ module Rbjq
     # Value dump shortened like jq 1.8 error messages: at most 29 bytes; a
     # longer dump keeps its first bytes (not splitting a character), then
     # "..." and the closing quote or bracket.
-    def dump_trunc(v, _max = nil)
+    def dump_trunc(v)
       s = Encoder.dump(v)
       return s if s.bytesize <= 29
 
