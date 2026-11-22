@@ -2,6 +2,7 @@
 
 [![test](https://github.com/winebarrel/rbjq/actions/workflows/test.yml/badge.svg)](https://github.com/winebarrel/rbjq/actions/workflows/test.yml)
 [![codecov](https://codecov.io/gh/winebarrel/rbjq/graph/badge.svg)](https://codecov.io/gh/winebarrel/rbjq)
+[![AI Generated](https://img.shields.io/badge/AI%20Generated-Claude-orange?logo=anthropic)](https://claude.com/product/claude-code)
 
 A pure Ruby implementation of [jq](https://jqlang.github.io/jq/). It has no
 native extensions and no runtime dependencies, and works both as a library
