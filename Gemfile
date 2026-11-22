@@ -6,3 +6,5 @@ gemspec
 
 gem 'minitest'
 gem 'rake'
+gem 'simplecov', require: false
+gem 'simplecov-cobertura', require: false
