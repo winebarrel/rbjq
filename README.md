@@ -75,12 +75,12 @@ program compiled afterwards:
 
 ```ruby
 # for one program
-Rbjq.query([1, 2], '.[] | double', functions: { 'double' => ->(x) { x * 2 } }) #=> [2, 4]
+Rbjq.query([1, 2], '.[] | double', functions: { double: ->(x) { x * 2 } }) #=> [2, 4]
 
 # for every program compiled afterwards
-Rbjq.define_function('add_n') { |x, n| x + n }
+Rbjq.define_function(:add_n) { |x, n| x + n }
 Rbjq.query(3, 'add_n(1, 10)') #=> [4, 13]
-Rbjq.undefine_function('add_n')
+Rbjq.undefine_function(:add_n)
 ```
 
 - The first parameter is the input; the others are the arguments, given as
