@@ -439,3 +439,31 @@ null
 input_line_number
 null
 0
+
+[-(1 - 1), -(2 - 2.0)] | map(tostring)
+null
+["-0","-0"]
+
+try ((try 1) | error("x")) catch ., try ((. as [$a] ?// $a | $a) | error("y")) catch ., [try (try error("x") catch error("y")) catch .]
+[1]
+"x"
+"y"
+["y"]
+
+try (. as [$a] ?// $a | error("z")) catch .
+[1]
+"z"
+
+[path(try error)], [path(try error catch .)]
+{"a":1}
+[]
+[[]]
+
+try ((try (try 1 catch 2)) | error("x")) catch ., try ((. as [$a] ?// $a | (try $a catch .)) | error("y")) catch .
+[1]
+"x"
+"y"
+
+[.[] | try (. as [$a] ?// {a: $a} | $a) catch "e"]
+[[1], {"a":2}, 3]
+[1,2,"e"]

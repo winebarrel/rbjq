@@ -156,7 +156,10 @@ module Rbjq
             if cp.between?(0xD800, 0xDBFF) && lo&.match?(/\A[dD][c-fC-F][0-9a-fA-F]{2}\z/)
               @pos += 6
               cp = 0x10000 + ((cp - 0xD800) << 10) + (lo.to_i(16) - 0xDC00)
-            elsif cp.between?(0xD800, 0xDFFF)
+            elsif cp.between?(0xD800, 0xDBFF)
+              # like jq: a high surrogate must be followed by a low one
+              error('Invalid \\uXXXX\\uXXXX surrogate pair escape')
+            elsif cp.between?(0xDC00, 0xDFFF)
               cp = 0xFFFD
             end
             buf << cp.chr(Encoding::UTF_8)

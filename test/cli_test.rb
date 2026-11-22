@@ -104,6 +104,7 @@ class CLITest < Minitest::Test
     assert_match(/invalid JSON text passed to --jsonargs/, cli(['-n', '--jsonargs', '.', '{'])[2])
     assert_match(/Usage:/, cli(['-h'])[1])
     assert_match(/\Arbjq-\d/, cli(['--version'])[1])
+    assert_match(/\Arbjq-\d/, cli(['-V'])[1])
   end
 
   def test_errors_and_exit_status
