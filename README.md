@@ -28,7 +28,7 @@ Rbjq.query({ 'users' => [{ 'name' => 'a', 'age' => 20 }, { 'name' => 'b', 'age' 
 
 # Compile once, run many times
 prog = Rbjq.compile('map(. * 2)')
-prog.run([1, 2, 3])          #=> [[2, 4, 6]]
+prog.run([1, 2, 3])           #=> [[2, 4, 6]]
 prog.each([1, 2]) { |v| p v } # streams outputs
 
 # JSON text in (may contain several values), Ruby values out
