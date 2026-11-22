@@ -1,0 +1,86 @@
+# Expected outputs were recorded from jq 1.8.2.
+# Format: program, input, expected outputs, blank line (like jq's tests/*.test).
+
+[.[] | try fromjson catch .]
+["{\"a\":1,}", "[1 2]", "\"abc", "-0", "{\"a\" \"b\"}", "[1,2}", "{\"a\":1]", "[1,]", "{,}", "[,1]", "[1 \"x\"]", "{\"a\":1 \"b\":2}", "{1:2}", "[}", "{]", "]", "}", ":", ",", "[1:2]", "{\"a\",1}", "[1", "{\"a\"", "{\"a\":", "tru e", "nul", "[true false]", "\"\\x\"", "\"\\u12\"", "\"a\nb\"", "{'a': 1}", "'a'", "NaN1", "nan", "-nan", "Infinity", "-Infinity", "[1,2]x", "\"\\ud800\"", "\"\\udc00x\"", "\"\\ud83d\\ude00\""]
+["Expected another key-value pair at line 1, column 8 (while parsing '{\"a\":1,}')","Expected separator between values at line 1, column 5 (while parsing '[1 2]')","Unfinished string at EOF at line 1, column 4 (while parsing '\"abc')",-0,"Expected separator between values at line 1, column 8 (while parsing '{\"a\" \"b\"}')","Objects must consist of key:value pairs at line 1, column 5 (while parsing '[1,2}')","Unmatched ']' at line 1, column 7 (while parsing '{\"a\":1]')","Expected another array element at line 1, column 4 (while parsing '[1,]')","Expected value before ',' at line 1, column 2 (while parsing '{,}')","Expected value before ',' at line 1, column 2 (while parsing '[,1]')","Expected separator between values at line 1, column 6 (while parsing '[1 \"x\"]')","Expected separator between values at line 1, column 10 (while parsing '{\"a\":1 \"b\":2}')","Object keys must be strings at line 1, column 3 (while parsing '{1:2}')","Unmatched '}' at line 1, column 2 (while parsing '[}')","Unmatched ']' at line 1, column 2 (while parsing '{]')","Unmatched ']' at line 1, column 1 (while parsing ']')","Unmatched '}' at line 1, column 1 (while parsing '}')","Expected string key before ':' at line 1, column 1 (while parsing ':')","Expected value before ',' at line 1, column 1 (while parsing ',')","':' not as part of an object at line 1, column 3 (while parsing '[1:2]')","Objects must consist of key:value pairs at line 1, column 5 (while parsing '{\"a\",1}')","Unfinished JSON term at EOF at line 1, column 2 (while parsing '[1')","Unfinished JSON term at EOF at line 1, column 4 (while parsing '{\"a\"')","Unfinished JSON term at EOF at line 1, column 5 (while parsing '{\"a\":')","Invalid literal at line 1, column 4 (while parsing 'tru e')","Invalid literal at EOF at line 1, column 3 (while parsing 'nul')","Expected separator between values at line 1, column 12 (while parsing '[true false]')","Invalid escape at line 1, column 4 (while parsing '\"\\x\"')","Invalid \\uXXXX escape at line 1, column 6 (while parsing '\"\\u12\"')","Invalid string: control characters from U+0000 through U+001F must be escaped at line 2, column 2 (while parsing '\"a\nb\"')","Invalid string literal; expected \", but got ' at line 1, column 5 (while parsing '{'a': 1}')","Invalid string literal; expected \", but got ' at EOF at line 1, column 3 (while parsing ''a'')","Invalid numeric literal at EOF at line 1, column 4 (while parsing 'NaN1')",null,null,1.7976931348623157e+308,-1.7976931348623157e+308,"Invalid numeric literal at EOF at line 1, column 6 (while parsing '[1,2]x')","Invalid \\uXXXX\\uXXXX surrogate pair escape at line 1, column 8 (while parsing '\"\\ud800\"')","�x","😀"]
+
+[.[] | try fromjson catch .]
+["", " ", "\n", "[", "{", "\"", "1.", ".5", "+1", "0x1", "1e", "--1", "00", "[[[[]]]]", "{\"a\":{\"b\":[null,true,false]}}"]
+["Expected JSON value (while parsing '')","Expected JSON value (while parsing ' ')","Expected JSON value (while parsing '\n')","Unfinished JSON term at EOF at line 1, column 1 (while parsing '[')","Unfinished JSON term at EOF at line 1, column 1 (while parsing '{')","Unfinished string at EOF at line 1, column 1 (while parsing '\"')",1,0.5,1,"Invalid numeric literal at EOF at line 1, column 3 (while parsing '0x1')","Invalid numeric literal at EOF at line 1, column 2 (while parsing '1e')","Invalid numeric literal at EOF at line 1, column 3 (while parsing '--1')",0,[[[[]]]],{"a":{"b":[null,true,false]}}]
+
+[.[] | tojson]
+["\u0000\u001f\u007f\u0080\u2028", "\"\\/", "é😀", [1.5, -0.25, 123456789012], {"a":[{}]}]
+["\"\\u0000\\u001f\\u007f \"","\"\\\"\\\\/\"","\"é😀\"","[1.5,-0.25,123456789012]","{\"a\":[{}]}"]
+
+.
+{"b":1,"a":[1,{"d":2,"c":[]}],"e":"é"}
+{"b":1,"a":[1,{"d":2,"c":[]}],"e":"é"}
+
+.[0]
+["\u00e9\ud83d\ude00\udc00"]
+"é😀�"
+
+[.[] | tostring]
+[0.1, 12345678.9, 0.000123]
+["0.1","12345678.9","0.000123"]
+
+[.[] | . * 1]
+[1e1000, 5e-324, 1.7976931348623157e308]
+[1.7976931348623157e+308,5e-324,1.7976931348623157e+308]
+
+reduce range(100) as $_ ([]; [.]) | tojson | length
+null
+202
+
+reduce range(100) as $_ ([]; [.]) | flatten
+null
+[]
+
+[getpath([range(100) | 0])], [setpath([range(5) | 0]; 1)]
+null
+[null]
+[[[[[[1]]]]]]
+
+[100|j0, j1, y0, y1], [60|jn(3; .), yn(3; .)], [(-1|j0, j1), jn(-2; 1), yn(-2; 1)] | map(. * 1000000 | round)
+null
+[19986,-77145,-77244,-20372]
+[-40397,-94823]
+[765198,-440051,114903,-1650683]
+
+[0|j0, j1, y0, y1], [(-1, nan) | y0 | isnan], (infinite | j0)
+null
+[1,0,-1.7976931348623157e+308,-1.7976931348623157e+308]
+[true,true]
+0
+
+"\u00e9\ud83d\ude00", "\(1)\u0041", "a\("b\("c")")d", "\((1 + (2)))"
+null
+"é😀"
+"1A"
+"abcd"
+"3"
+
+.foo?, ."foo"?, .["foo"]?, .foo[0]?
+{"foo":[1]}
+[1]
+[1]
+[1]
+1
+
+{"a": 1} | .a as $x | {$x, "y": $x, ($x | tostring): $x}
+null
+{"x":1,"y":1,"1":1}
+
+{@base64 "x": 1}, {"\(1 + 1)": 2}
+null
+{"x":1}
+{"2":2}
+
+. # trailing comment
+null
+null
+
+1
+null
+1

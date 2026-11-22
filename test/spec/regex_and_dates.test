@@ -1,0 +1,219 @@
+# Expected outputs were recorded from jq 1.8.2.
+# Format: program, input, expected outputs, blank line (like jq's tests/*.test).
+
+[.[] | test("a")], [.[] | test("A"; "i")], [.[] | test("a.c"; "x")]
+["abc", "xyz", "ABC"]
+[true,false,false]
+[true,false,true]
+[true,false,false]
+
+test(["a", "i"]), test(["b"]), try test(1) catch ., try test([]) catch .
+"Abc"
+true
+true
+"number not a string or array"
+"array not a string or array"
+
+[match("a"; "g").offset], [match("(?<x>a)(b)?"; "g") | .captures]
+"aab"
+[0,1]
+[[{"offset":0,"length":1,"string":"a","name":"x"},{"offset":-1,"string":null,"length":0,"name":null}],[{"offset":1,"length":1,"string":"a","name":"x"},{"offset":2,"length":1,"string":"b","name":null}]]
+
+[match(["a", "gi"]) | .offset], [match(["a"]) | .offset]
+"aAa"
+[0,1,2]
+[0]
+
+capture("(?<y>\\d+)-(?<m>\\d+)"), [capture("(?<d>\\d)"; "g")], capture(["(?<a>a)"])
+"2024-11 xa"
+{"y":"2024","m":"11"}
+[{"d":"2"},{"d":"0"},{"d":"2"},{"d":"4"},{"d":"1"},{"d":"1"}]
+{"a":"a"}
+
+[scan("\\d")], [scan("(\\d)(\\w)")], [scan("A"; "i")]
+"a1b2c3"
+["1","2","3"]
+[["1","b"],["2","c"]]
+["a"]
+
+sub("a"; "x"), gsub("a"; "x"), sub("(?<l>a)"; "<\(.l)>"; "g"), gsub("A"; "-"; "i"), sub("z"; "x"), [sub("a"; empty)]
+"banana"
+"bxnana"
+"bxnxnx"
+"b<a>n<a>n<a>"
+"b-n-n-"
+"banana"
+["banana"]
+
+gsub("(?<a>a)|(?<b>b)"; if .a then "A" else "B" end)
+"abab"
+"ABAB"
+
+[gsub("a"; "1", "2")], [sub("a"; "1", "2")]
+"aa"
+["11","22"]
+["1a","2a"]
+
+gsub("^"; ">"), gsub("$"; "<"), gsub(""; "|"), gsub("x*"; "-")
+"ab"
+">ab"
+"ab<"
+"|a|b|"
+"-a-b-"
+
+[splits("\\s+")], split("\\s+"; null), split(", *"; "g"), [splits("a"; "i")]
+"a b   cAd"
+["a","b","cAd"]
+["a","b","cAd"]
+["a b   cAd"]
+[""," b   c","d"]
+
+sub("(?<x>.)"; "\(.x)\(.x)"), [match("") | .offset], [match(""; "g") | .offset]
+"ab"
+"aab"
+[0]
+[0,1,2]
+
+test("^b"), test("a$"), test("^a"), test("b$"), [match("^."; "g").string]
+"a\nb"
+false
+false
+true
+true
+["a"]
+
+[match("."; "g").string], [match("."; "gs").string], [match("a.b"; "p").string]
+"a\nb"
+["a","b"]
+["a","b"]
+["a\nb"]
+
+[match("(a)|(b)"; "g") | [.captures[] | .offset]]
+"ab"
+[[0,-1],[-1,1]]
+
+[match("a+?"; "g").string], [match("a+"; "gl").string], [match("a*"; "gn").string]
+"aaa"
+["a","a","a"]
+["aaa"]
+["aaa"]
+
+[match("é").offset], [match("😀(.)").captures[0].offset], length
+"aé😀x"
+[1]
+[3]
+4
+
+test("[a-z]+"), test("[^a-z]"), test("[]a]"), test("\\$"), test("x{2}")
+"a]$xx"
+true
+true
+true
+true
+true
+
+[match("(?<n>a)(?<n2>b)?(c)").captures[] | .name]
+"ac"
+["n","n2",null]
+
+[match("(x)?"; "g")][0].captures, [test("( )*"; "gn")], [test("( )*"; "g")]
+"abc"
+[{"offset":-1,"string":null,"length":0,"name":null}]
+[false]
+[true]
+
+[try ("abc" | test(1)) catch ., try ("abc" | test("a"; 1)) catch ., try ("abc" | test("a"; "q")) catch ., try (1 | test("a")) catch ., try ("x" | splits(1)) catch .]
+null
+["number not a string or array","number (1) is not a string","q is not a valid modifier string","number (1) cannot be matched, as it is not a string","number (1) is not a string"]
+
+todate, todateiso8601, (todate | fromdate), (todate | fromdateiso8601)
+1425599507
+"2015-03-05T23:51:47Z"
+"2015-03-05T23:51:47Z"
+1425599507
+1425599507
+
+gmtime, (gmtime | mktime), (gmtime | todate)
+1425599507
+[2015,2,5,23,51,47,4,63]
+1425599507
+"2015-03-05T23:51:47Z"
+
+gmtime
+1425599507.25
+[2015,2,5,23,51,47.25,4,63]
+
+strftime("%Y-%m-%dT%H:%M:%SZ"), strftime("%A, %B %d, %Y"), strftime("%j %e %H %I %p %M %S %u %w %y %Z %%")
+1425599507
+"2015-03-05T23:51:47Z"
+"Thursday, March 05, 2015"
+"064  5 23 11 PM 51 47 4 4 15 UTC %"
+
+strptime("%Y-%m-%dT%H:%M:%SZ"), (strptime("%Y-%m-%dT%H:%M:%SZ") | mktime)
+"2015-03-05T23:51:47Z"
+[2015,2,5,23,51,47,4,63]
+1425599507
+
+strptime("%d %B %Y"), (strptime("%d %B %Y") | mktime)
+"05 March 2015"
+[2015,2,5,0,0,0,4,63]
+1425513600
+
+"10:15" | strptime("%H:%M")
+null
+[1900,0,0,10,15,0,6,-1]
+
+"1425599507" | strptime("%s") | mktime
+null
+1425599507
+
+[.[] | mktime]
+[[2015,2,5,23,51,47,4,63], [2015,14,5,0,0,0,0,0], [1970,0,1,0,0,0,0,0], [2000,0,0,0,0,0,0,0], [2024], [2024,2], [2024.7,1.9,3.2,4.8,5.5,6.6]]
+[1425599507,1457136000,0,946598400,1703980800,1709164800,1706933106]
+
+[.[] | todate]
+[0, 951782400, 4102444800, -86400, 1.9]
+["1970-01-01T00:00:00Z","2000-02-29T00:00:00Z","2100-01-01T00:00:00Z","1969-12-31T00:00:00Z","1970-01-01T00:00:01Z"]
+
+[.[] | try mktime catch .], [.[] | try strftime("%Y") catch .], [.[] | try gmtime catch .], [.[] | try strptime("%Y") catch .]
+[[], ["a"], "x", 1, null]
+["invalid gmtime representation","mktime requires parsed datetime inputs","mktime requires array inputs","mktime requires array inputs","mktime requires array inputs"]
+["1900","strftime/1 requires parsed datetime inputs","strftime/1 requires parsed datetime inputs","1970","strftime/1 requires parsed datetime inputs"]
+["gmtime() requires numeric inputs","gmtime() requires numeric inputs","gmtime() requires numeric inputs",[1970,0,1,0,0,1,4,0],"gmtime() requires numeric inputs"]
+["strptime/1 requires string inputs and arguments","strptime/1 requires string inputs and arguments","date \"x\" does not match format \"%Y\"","strptime/1 requires string inputs and arguments","strptime/1 requires string inputs and arguments"]
+
+[try (1 | strftime(1)) catch ., try ("x" | strptime(1)) catch ., try ("x" | fromdate) catch .]
+null
+["strftime/1 requires a string format","strptime/1 requires string inputs and arguments","date \"x\" does not match format \"%Y-%m-%dT%H:%M:%SZ\""]
+
+[localtime | type, length], (strflocaltime("%Y") | test("^[0-9]{4}$")), (localtime | mktime | type), ([2024,0,15] | strflocaltime("%Y-%m"))
+1425599507
+["array",8]
+true
+"number"
+"2024-01"
+
+[now | type, (. > 1700000000)]
+null
+["number",true]
+
+strftime("%C|%k|%l|%a|%b|%h|%n|%t|%D|%F|%T|%R|%r|%c|%x|%X|%s|%z|%Z|%U|%W|%V|%G|%g|%-d|%_H")
+1425599507
+"20|23|11|Thu|Mar|Mar|\n|\t|03/05/15|2015-03-05|23:51:47|23:51|11:51:47 PM|Thu Mar  5 23:51:47 2015|03/05/15|23:51:47|1425599507|+0000|UTC|09|09|10|2015|15|5|23"
+
+[2015,2,5,13,4,5,4,63] | strftime("%k %l %I %p %a %b"), strflocaltime("%s %z %Z %c")
+null
+"13  1 01 PM Thu Mar"
+"1425560645 +0000 UTC Thu Mar  5 13:04:05 2015"
+
+[0, 3600, 86399] | map(strftime("%H %I %p %l %k"))
+null
+["00 12 AM 12  0","01 01 AM  1  1","23 11 PM 11 23"]
+
+[.[] | try fromdate catch .]
+["2015-03-05T23:51:47Z", "2015-03-05", 1]
+[1425599507,"date \"2015-03-05\" does not match format \"%Y-%m-%dT%H:%M:%SZ\"","strptime/1 requires string inputs and arguments"]
+
+[.[] | try (tostring | test("(?P<x>a)")) catch .]
+["a"]
+["Regex failure: undefined group option"]

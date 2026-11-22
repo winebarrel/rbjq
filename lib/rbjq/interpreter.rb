@@ -59,7 +59,7 @@ module Rbjq
         call_function(node, input, path, env, &blk)
       when :iterate
         eval_node(node[1], input, path, env) do |t, tp|
-          check_path!(t, tp) if path
+          check_iterate_path!(t, tp) if path
           iterate(t, tp, &blk)
         end
       when :slice
@@ -165,6 +165,20 @@ module Rbjq
       raise JQError, "Invalid path expression with result #{Value.dump_trunc(v)}"
     end
 
+    # Messages follow jq (key truncated to 11 bytes, value to 26)
+    def check_access_path!(t, tp, k)
+      return unless tp.equal?(INVALID)
+
+      raise JQError, "Invalid path expression near attempt to access element " \
+                     "#{Value.dump_trunc(k)} of #{Value.dump_trunc(t, 26)}"
+    end
+
+    def check_iterate_path!(t, tp)
+      return unless tp.equal?(INVALID)
+
+      raise JQError, "Invalid path expression near attempt to iterate through #{Value.dump_trunc(t, 26)}"
+    end
+
     def eval_index(node, input, path, env, &blk)
       target = node[1]
       key = node[2]
@@ -172,7 +186,7 @@ module Rbjq
         k = key[1]
         eval_node(target, input, path, env) do |t, tp|
           if path
-            check_path!(t, tp)
+            check_access_path!(t, tp, k)
             yield Ops.index(t, k), tp + [k]
           else
             yield Ops.index(t, k), nil
@@ -182,7 +196,7 @@ module Rbjq
         eval_node(key, input, nil, env) do |k|
           eval_node(target, input, path, env) do |t, tp|
             if path
-              check_path!(t, tp)
+              check_access_path!(t, tp, k)
               yield Ops.index(t, k), tp + [k]
             else
               yield Ops.index(t, k), nil
@@ -199,7 +213,7 @@ module Rbjq
           eval_node(target, input, path, env) do |t, tp|
             v = Ops.slice(t, from, to)
             if path
-              check_path!(t, tp)
+              check_access_path!(t, tp, { 'start' => from, 'end' => to })
               yield v, tp + [{ 'start' => from, 'end' => to }]
             else
               yield v, nil
@@ -247,8 +261,8 @@ module Rbjq
           raise DownstreamError.new(e, marker)
         end
       rescue JQError => e
-
-        eval_node(handler, e.value, (path && INVALID), env, &blk) if handler
+        # the handler's input keeps the path only if it is the try's input itself
+        eval_node(handler, e.value, (path && (e.value.equal?(input) ? path : INVALID)), env, &blk) if handler
       rescue DownstreamError => d
         raise d.error if d.marker.equal?(marker)
 
@@ -262,7 +276,6 @@ module Rbjq
 
       case name
       when 'ENV' then ENV.to_h
-      when '__prog_args' then []
       else raise JQError, "$#{name} is not defined"
       end
     end
@@ -335,7 +348,7 @@ module Rbjq
         return
       end
       unless v.nil? || v.is_a?(Array)
-        raise JQError, "Cannot index #{Value.type_name(v)} with number"
+        Ops.index_error(v, i)
       end
 
       bind_pattern(pats[i], Ops.index(v, i), input, env) do |e2|
@@ -399,40 +412,37 @@ module Rbjq
       _, src, patterns, init, update = node
       eval_node(init, input, path, env) do |iv, ip|
         state = iv
-        spath = ip
         eval_node(src, input, nil, env) do |x|
           bind_for_loop(patterns, x, input, env) do |e2|
             got = false
             last = nil
-            lastp = nil
-            eval_node(update, state, spath, e2) do |v, p|
+            eval_node(update, state, state_path(state, iv, ip), e2) do |v, _|
               got = true
               last = v
-              lastp = p
             end
-            if got
-              state = last
-              spath = lastp
-            else
-              state = nil
-              spath = path && INVALID
-            end
+            state = got ? last : nil
           end
         end
-        yield state, spath
+        yield state, state_path(state, iv, ip)
       end
+    end
+
+    # jq tracks paths by value identity: a loop state has the path of the
+    # initial value only while it still is that value.
+    def state_path(state, init, init_path)
+      return nil if init_path.nil?
+
+      state.equal?(init) ? init_path : INVALID
     end
 
     def eval_foreach(node, input, path, env)
       _, src, patterns, init, update, extract = node
       eval_node(init, input, path, env) do |iv, ip|
         state = iv
-        spath = ip
         eval_node(src, input, nil, env) do |x|
           bind_for_loop(patterns, x, input, env) do |e2|
-            eval_node(update, state, spath, e2) do |v, p|
+            eval_node(update, state, state_path(state, iv, ip), e2) do |v, p|
               state = v
-              spath = p
               if extract
                 eval_node(extract, v, p, e2) { |ev, ep| yield ev, ep }
               else
@@ -690,12 +700,6 @@ module Rbjq
       end
     end
 
-    def collect(node, input, env)
-      out = []
-      eval_node(node, input, nil, env) { |v| out << v }
-      out
-    end
-
     def first_value(node, input, env)
       tag = Object.new
       result = nil
@@ -711,10 +715,11 @@ module Rbjq
     end
 
     def next_input
-      raise JQError, 'No more inputs' unless @input_provider
+      # jq raises "break" when there are no more inputs (`inputs` catches it)
+      raise JQError, 'break' unless @input_provider
 
       v = @input_provider.call
-      raise JQError, 'No more inputs' if v.equal?(JSONParser::EOF)
+      raise JQError, 'break' if v.equal?(JSONParser::EOF)
 
       v
     end

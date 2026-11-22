@@ -71,15 +71,15 @@ module Rbjq
       return 0 if @done
 
       prog = compile
-      return 3 unless prog
+      return (@no_filter ? 2 : 3) unless prog
 
       process(prog)
     rescue UsageError => e
-      @stderr.puts "rbjq: error: #{e.message}"
+      @stderr.puts "rbjq: #{e.message}"
       @stderr.puts 'Use rbjq --help for help with command-line options,'
-      @stderr.puts 'or see the jq manpage, or online docs  at https://jqlang.github.io/jq'
+      @stderr.puts 'or see the jq manpage, or online docs at https://jqlang.org'
       2
-    rescue Errno::ENOENT, Errno::EACCES, Errno::EISDIR => e
+    rescue SystemCallError => e
       @stderr.puts "rbjq: error: Could not open #{e.message}"
       2
     rescue Errno::EPIPE
@@ -134,13 +134,12 @@ module Rbjq
           when '--monochrome-output' then @opts[:color] = false
           when '--tab' then @opts[:tab] = true
           when '--indent'
-            n = args.shift or raise UsageError, '--indent takes one parameter'
-            raise UsageError, '--indent takes a number' unless n.match?(/\A\d+\z/)
+            n = args.shift
+            unless n&.match?(/\A-?\d+\z/) && n.to_i.between?(-1, 7)
+              raise UsageError, '--indent takes a number between -1 and 7'
+            end
 
-            n = n.to_i
-            raise UsageError, 'Cannot indent more than 7 characters' if n > 7
-
-            @opts[:indent] = n
+            @opts[:indent] = n.to_i
           when '--unbuffered' then @opts[:unbuffered] = true
           when '--stream' then @opts[:stream] = true
           when '--seq' then @opts[:seq] = true
@@ -154,7 +153,7 @@ module Rbjq
             begin
               @named[name] = JSONParser.parse(text)
             rescue ParseError
-              raise UsageError, "Invalid JSON text passed to --argjson"
+              raise UsageError, 'invalid JSON text passed to --argjson'
             end
           when '--slurpfile', '--rawfile'
             name, file = take2(args, a)
@@ -172,7 +171,7 @@ module Rbjq
             return
           when '--debug-dump-disasm', '--debug-trace' then nil
           else
-            raise UsageError, "Unknown option: #{a}"
+            raise UsageError, "Unknown option #{a}"
           end
         elsif a.length > 1
           shorts = a[1..].chars
@@ -200,7 +199,7 @@ module Rbjq
               @done = true
               return
             else
-              raise UsageError, "Unknown option: #{a}"
+              raise UsageError, "Unknown option #{a}"
             end
           end
         else
@@ -230,7 +229,7 @@ module Rbjq
         begin
           @positional << JSONParser.parse(a)
         rescue ParseError
-          raise UsageError, "Invalid JSON text passed to --jsonargs"
+          raise UsageError, 'invalid JSON text passed to --jsonargs'
         end
       else
         @positional << a
@@ -244,19 +243,22 @@ module Rbjq
         @files.unshift(@filter) if @filter
         @filter = src
       end
+      # like jq, the filter defaults to "." unless both ends are terminals
+      @filter = '.' if @filter.nil? && !(tty?(@stdin) && tty?(@stdout))
       if @filter.nil?
         @stderr.puts USAGE
-        @done = true
+        @no_filter = true
         return nil
       end
 
       vars = @named.dup
       vars['ARGS'] = { 'positional' => @positional, 'named' => @named.dup }
-      vars['__prog_args'] = @positional
       @current_file = nil
       @current_line = 0
       Program.new(@filter, vars: vars, stderr: @stderr,
-                           filename_proc: -> { @current_file }, line_proc: -> { @current_line })
+                           filename_proc: -> { @read_any ? (@current_file || '<stdin>') : nil }, line_proc: -> { @current_line },
+                           jq_origin: File.expand_path('../../exe', __dir__),
+                           prog_origin: @from_file ? File.dirname(File.expand_path(@from_file)) : Dir.pwd)
     rescue CompileError => e
       @stderr.puts "rbjq: error: #{e.message}"
       @stderr.puts 'rbjq: 1 compile error'
@@ -274,7 +276,7 @@ module Rbjq
     end
 
     def read_utf8(path)
-      File.read(path, encoding: Encoding::UTF_8).scrub("\uFFFD")
+      Value.scrub_utf8(File.binread(path))
     end
 
     def read_source(name, io)
@@ -284,6 +286,10 @@ module Rbjq
       else
         File.binread(name)
       end
+    rescue SystemCallError => e
+      @stderr.puts "rbjq: error: Could not open file #{name}: #{SystemCallError.new(nil, e.errno).message}"
+      @input_failed = true
+      ''
     end
 
     # Returns an Enumerator of input values
@@ -298,7 +304,7 @@ module Rbjq
               all << read_source(name, io)
               @current_line = all.count("\n")
             end
-            y << all.force_encoding(Encoding::UTF_8).scrub("�")
+            y << Value.scrub_utf8(all)
           else
             carry = +''
             sources.each do |name, io|
@@ -310,10 +316,10 @@ module Rbjq
               @current_line = 0
               lines.each do |l|
                 @current_line += 1
-                y << l.scrub("�")
+                y << Value.scrub_utf8(l)
               end
             end
-            y << carry.scrub("�") unless carry.empty?
+            y << Value.scrub_utf8(carry) unless carry.empty?
           end
         elsif @opts[:slurp]
           all = []
@@ -332,7 +338,8 @@ module Rbjq
     end
 
     def each_json(text, &blk)
-      text = text.delete("\x1e") if @opts[:seq]
+      return each_json_seq(text, &blk) if @opts[:seq]
+
       parser = JSONParser.new(text)
       @read_any = true
       @current_line = 0
@@ -346,6 +353,30 @@ module Rbjq
         else
           yield v
         end
+      end
+    end
+
+    # application/json-seq: each text is preceded by RS; text before the
+    # first RS is abandoned and a broken text is skipped, like jq.
+    def each_json_seq(text, &blk)
+      parts = text.split("\x1e", -1)
+      head = parts.shift
+      unless head.strip.empty?
+        lines = head.count("\n")
+        col = head.length - (head.rindex("\n")&.+(1) || 0)
+        @stderr.puts "rbjq: ignoring parse error: Unfinished abandoned text at EOF at line #{lines + 1}, column #{col}"
+      end
+      parts.each do |part|
+        parser = JSONParser.new(part)
+        @read_any = true
+        loop do
+          v = parser.next_value
+          break if v.equal?(JSONParser::EOF)
+
+          @opts[:stream] ? stream_events(v, [], true, &blk) : yield(v)
+        end
+      rescue ParseError => e
+        @stderr.puts "rbjq: ignoring parse error: #{e.message}"
       end
     end
 
@@ -373,6 +404,10 @@ module Rbjq
 
     # ------------------------------------------------------------ output
 
+    def tty?(io)
+      io.respond_to?(:tty?) && io.tty?
+    end
+
     def color?
       return @opts[:color] unless @opts[:color].nil?
       return false if ENV['NO_COLOR'] && !ENV['NO_COLOR'].empty?
@@ -380,11 +415,12 @@ module Rbjq
       @stdout.respond_to?(:tty?) && @stdout.tty?
     end
 
+    # --indent -1 means tabs; 0 means newlines without indentation
     def encoder
-      indent = @opts[:compact] ? 0 : @opts[:indent]
-      tab = !@opts[:compact] && @opts[:tab]
+      tab = !@opts[:compact] && (@opts[:tab] || @opts[:indent] == -1)
+      indent = @opts[:indent].clamp(0, 7)
       Encoder.new(indent: indent, tab: tab, sort_keys: @opts[:sort_keys], ascii: @opts[:ascii],
-                  color: color?, colors: Encoder.parse_colors(ENV['JQ_COLORS']))
+                  color: color?, colors: Encoder.parse_colors(ENV['JQ_COLORS']), pretty: !@opts[:compact])
     end
 
     def process(prog)
@@ -402,9 +438,8 @@ module Rbjq
       emit = lambda do |v|
         @stdout.write("\x1e") if @opts[:seq]
         if @opts[:raw] && v.is_a?(String)
-          s = v
-          s = Encoder.escape_string(v, true)[1...-1] if @opts[:ascii]
-          @stdout.write(s)
+          # with --ascii-output, jq prints strings as JSON even with -r
+          @stdout.write(@opts[:ascii] ? Encoder.escape_string(v, true) : v)
         else
           @stdout.write(enc.encode(v))
         end
@@ -418,6 +453,7 @@ module Rbjq
       end
 
       run_one = lambda do |input|
+        error_status = nil
         prog.each(input, inputs: provider) { |v| emit.call(v) }
       rescue JQError => e
         print_error(e)
@@ -428,12 +464,19 @@ module Rbjq
         run_one.call(nil)
       else
         loop do
-          v = provider.call
+          v = begin
+            provider.call
+          rescue ParseError => e
+            @stderr.puts "rbjq: parse error: #{e.message}"
+            return 5
+          end
           break if v.equal?(JSONParser::EOF)
 
           run_one.call(v)
         end
       end
+
+      return 2 if @input_failed
 
       status = error_status if error_status
       if @opts[:exit_status] && status.zero?
@@ -446,9 +489,6 @@ module Rbjq
                  end
       end
       status
-    rescue ParseError => e
-      @stderr.puts "rbjq: error (at #{location}): #{e.message}"
-      2
     rescue HaltError => e
       if e.value? && !e.value.nil?
         if e.value.is_a?(String)

@@ -56,12 +56,13 @@ rbjq -r '.[] | @csv' data.json
 Supported options: `-n`, `-r`, `-j`, `--raw-output0`, `-a`, `-c`, `-s`, `-R`,
 `-S`, `-e`, `-C`, `-M`, `--tab`, `--indent n`, `-f file`, `--arg`,
 `--argjson`, `--slurpfile`, `--rawfile`, `--args`, `--jsonargs`, `--stream`,
-`--seq`, `--unbuffered`. Exit codes follow jq (1/4 with `-e`, 2 for usage and
-input errors, 3 for compile errors, 5 for runtime errors).
+`--seq`, `--unbuffered`. Exit codes follow jq: 1 or 4 with `-e`, 2 for usage
+errors and unreadable files, 3 for compile errors, and 5 for runtime errors
+and invalid JSON input (decided by the last input, like jq).
 
 ## Compatibility
 
-rbjq targets jq 1.7 semantics:
+rbjq targets jq 1.8.2:
 
 - Full language: pipes, generators, `reduce`/`foreach`, `if/elif/else`,
   `try/catch`, `?`, `label`/`break`, `def` with filter and `$value`
@@ -70,24 +71,35 @@ rbjq targets jq 1.7 semantics:
   assignment operators (`=`, `|=`, `+=`, `//=`, ...)
 - Path expressions: `path/1`, `paths`, `getpath`/`setpath`/`delpaths`, `del`,
   `pick`, `to_entries`, `tostream`/`fromstream`/`truncate_stream`, `--stream`
-- Most builtins, including regex functions (`test`, `match`, `capture`, `scan`,
-  `split/2`, `sub`, `gsub`), date functions, math functions, `limit`, `first`,
-  `until`, `while`, `repeat`, `walk`, `env`, `input`/`inputs`, `getpath`,
-  `splits`, `ltrimstr`, `trim`, `abs`, `toarray`, `have_decnum`, ...
-- Output: jq's number formatting (shortest round-trip, `1e+100` style),
-  pretty printing, colors (`JQ_COLORS`), `--sort-keys`, `--ascii-output`
+- The builtins of jq 1.8.2, including regex functions (`test`, `match`,
+  `capture`, `scan`, `splits`, `sub`, `gsub`), date functions, math functions
+  (including `j0`/`y0` and friends), `limit`, `skip`, `first`, `nth`,
+  `until`, `repeat`, `walk`, `pick`, `toboolean`, `trimstr`, `@urid`,
+  `input`/`inputs`, `input_line_number`, `getpath`, `bsearch`, `JOIN`, ...
+- jq's error messages, including JSON parse errors
+- Depth limits like jq: values nested more than 10,000 levels deep are
+  reported as too deep (parsing, printing, comparison, paths, ...)
+- Output: jq's number formatting, pretty printing (`--indent`, `--tab`),
+  colors (`JQ_COLORS`), `--sort-keys`, `--ascii-output`, `--seq`
 
-The test suite includes 650+ cases whose expected outputs were recorded from
-jq 1.7.1.
+Tests:
+
+- `test/upstream_test.rb`: jq's own test suite from jq 1.8.2 (879 cases;
+  15 are skipped). `rake test` downloads it into `test/jq/` first
+  (`rake jq:download`; the files are pinned by tag and SHA-256).
+- `test/spec/`: specification tests by area, in jq's test format, whose
+  expected outputs were recorded from jq 1.8.2
+- `test/fixtures/jq_compat.tsv`: 650+ more cases recorded from jq 1.8.2
 
 Known differences:
 
-- Number literals are canonicalized (`1.0` prints as `1`). Large integer
-  literals are kept exactly until arithmetic is applied to them.
+- Numbers are IEEE 754 doubles, like jq built without decNumber
+  (`have_decnum` is `false`): number literals are not preserved, so `1.0`
+  prints as `1` and `100000000000000000001` as `100000000000000000000`.
 - `import` / `include` (modules) are not supported.
 - Regular expressions use Ruby's Onigmo engine (close to jq's Oniguruma).
-- `strftime` always uses English (C locale) names.
-- `repeat(f)` follows the documented semantics (`., (f | repeat(f))`).
+- `strftime` always uses the C locale, and `gamma` is `lgamma`.
+- Bessel functions may differ from libm in the last digits.
 
 ### Performance and recursion
 
@@ -108,5 +120,5 @@ around 1,000 levels.
 
 ```sh
 bundle install
-bundle exec rake test
+bundle exec rake test   # downloads jq's test suite on the first run
 ```

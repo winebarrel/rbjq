@@ -9,12 +9,22 @@ module Rbjq
       v.is_a?(String) ? v : Encoder.dump(v)
     end
 
-    def index_error(t, k)
-      if k.is_a?(String)
-        raise JQError, "Cannot index #{Value.type_name(t)} with string #{Encoder.escape_string(k)}"
-      end
+    MAX_PATH_DEPTH = 10_000
+    MAX_ARRAY_INDEX = 536_870_911
 
-      raise JQError, "Cannot index #{Value.type_name(t)} with #{Value.type_name(k)}"
+    def index_error(t, k)
+      raise JQError, "Cannot index #{Value.type_name(t)} with #{Value.type_name(k)} (#{Value.dump_trunc(k)})"
+    end
+
+    # A path component that selects a slice: {"start": n|null, "end": n|null}
+    def slice_key?(k)
+      k.is_a?(Hash)
+    end
+
+    def check_slice_key(k)
+      unless k.key?('start') && k.key?('end')
+        raise JQError, 'Array/string slice indices must be integers'
+      end
     end
 
     def index(t, k)
@@ -29,13 +39,13 @@ module Rbjq
           k += t.length if k.negative?
           k.negative? ? nil : t[k]
         when Float
-          return nil if k.nan?
-          return nil if k.infinite?
+          return nil if k.nan? || k.infinite?
 
           i = k.floor
           i += t.length if i.negative?
           i.negative? ? nil : t[i]
         when Hash
+          check_slice_key(k)
           slice(t, k['start'], k['end'])
         when Array
           indices_of(t, k)
@@ -44,11 +54,12 @@ module Rbjq
         end
       when nil
         case k
-        when String, Integer, Float, Hash, nil then nil
+        when String, Integer, Float, Hash, Array, nil then nil
         else index_error(t, k)
         end
       when String
-        if k.is_a?(Hash) && (k.key?('start') || k.key?('end'))
+        if k.is_a?(Hash)
+          check_slice_key(k)
           slice(t, k['start'], k['end'])
         else
           index_error(t, k)
@@ -59,7 +70,7 @@ module Rbjq
     end
 
     def indices_of(arr, sub)
-      return nil if sub.empty?
+      return [] if sub.empty?
 
       out = []
       (0..(arr.length - sub.length)).each do |i|
@@ -73,17 +84,16 @@ module Rbjq
         raise JQError, 'Start and end indices of an array slice must be numbers'
       end
 
-      ds = from.nil? ? 0.0 : from.to_f
-      de = to.nil? ? len.to_f : to.to_f
+      # NaN bounds behave like omitted ones
+      ds = from.nil? || (from.is_a?(Float) && from.nan?) ? 0.0 : from.to_f
+      de = to.nil? || (to.is_a?(Float) && to.nan?) ? len.to_f : to.to_f
       ds += len if ds.negative?
       de += len if de.negative?
-      ds = 0.0 if ds.negative?
-      ds = len.to_f if ds > len
-      de = len.to_f if de > len
-      de = ds if de < ds
+      ds = ds.clamp(0.0, len.to_f)
+      de = de.clamp(0.0, len.to_f)
       s = ds.floor
-      e = de > de.floor ? de.floor + 1 : de.floor
-      e = len if e > len
+      e = de.ceil
+      e = s if e < s
       [s, e]
     end
 
@@ -94,19 +104,20 @@ module Rbjq
         s, e = slice_bounds(t.length, from, to)
         t[s...e]
       when String
-        chars = t.length
-        s, e = slice_bounds(chars, from, to)
+        s, e = slice_bounds(t.length, from, to)
         t[s...e]
       else
-        raise JQError, "Cannot index #{Value.type_name(t)} with object"
+        index_error(t, { 'start' => from, 'end' => to })
       end
     end
 
-    def getpath(t, path)
-      unless path.is_a?(Array)
-        raise JQError, 'Path must be specified as an array'
-      end
+    def check_path(path)
+      raise JQError, 'Path must be specified as an array' unless path.is_a?(Array)
+      raise JQError, 'Path too deep' if path.size > MAX_PATH_DEPTH
+    end
 
+    def getpath(t, path)
+      check_path(path)
       path.each do |k|
         return nil if t.nil?
 
@@ -115,24 +126,18 @@ module Rbjq
       t
     end
 
-    def setpath(t, path, v, i = 0)
-      raise JQError, 'Path must be specified as an array' unless path.is_a?(Array)
-      return v if i == path.size
-
-      k = path[i]
+    # Returns a copy of `t` whose element at key `k` is replaced by `v`.
+    def set_child(t, k, v)
       case k
       when String
-        unless t.nil? || t.is_a?(Hash)
-          raise JQError, "Cannot index #{Value.type_name(t)} with #{Encoder.escape_string(k)}"
-        end
+        index_error(t, k) unless t.nil? || t.is_a?(Hash)
 
         h = t.nil? ? {} : t.dup
-        h[k] = setpath(h[k], path, v, i + 1)
+        h[k] = v
         h
       when Integer, Float
-        unless t.nil? || t.is_a?(Array)
-          raise JQError, "Cannot index #{Value.type_name(t)} with number"
-        end
+        index_error(t, k) unless t.nil? || t.is_a?(Array)
+        raise JQError, 'Cannot set array element at NaN index' if k.is_a?(Float) && k.nan?
 
         a = t.nil? ? [] : t.dup
         idx = k.to_f.floor
@@ -140,87 +145,171 @@ module Rbjq
           idx += a.length
           raise JQError, 'Out of bounds negative array index' if idx.negative?
         end
-        a[idx] = setpath(a[idx], path, v, i + 1)
+        raise JQError, 'Array index too large' if idx > MAX_ARRAY_INDEX
+
+        a[idx] = v
         a
       when Hash
         case t
         when nil, Array
+          check_slice_key(k)
           a = t.nil? ? [] : t
           s, e = slice_bounds(a.length, k['start'], k['end'])
-          nv = setpath(a[s...e], path, v, i + 1)
-          raise JQError, 'A slice of an array can only be assigned another array' unless nv.is_a?(Array)
+          raise JQError, 'A slice of an array can only be assigned another array' unless v.is_a?(Array)
 
-          a[0...s] + nv + a[e..]
+          a[0...s] + v + a[e..]
         when String
           raise JQError, 'Cannot update string slices'
         else
-          raise JQError, "Cannot update field at object index of #{Value.type_name(t)}"
+          index_error(t, k)
         end
-      when nil
-        raise JQError, "Cannot index #{Value.type_name(t)} with null" unless t.nil? || t.is_a?(Hash)
+      when Array
+        raise JQError, 'Cannot update field at array index of array' if t.is_a?(Array)
 
-        setpath(t, path, v, i + 1)
+        index_error(t, k)
       else
-        raise JQError, "Invalid path component #{Value.desc(k)}"
+        index_error(t, k)
       end
+    end
+
+    # Iterative, so that paths of up to MAX_PATH_DEPTH components work with
+    # the default Ruby stack.
+    def setpath(t, path, v)
+      check_path(path)
+      return v if path.empty?
+
+      # walk down, remembering each container
+      containers = [t]
+      cur = t
+      path[0...-1].each do |k|
+        cur = setpath_child(cur, k)
+        containers << cur
+      end
+      # rebuild bottom-up
+      (path.size - 1).downto(0) do |i|
+        v = set_child(containers[i], path[i], v)
+      end
+      v
+    end
+
+    # The current value at `k` while descending for setpath
+    def setpath_child(t, k)
+      return nil if t.nil?
+
+      if k.is_a?(Hash) && (t.is_a?(Array) || t.nil?)
+        check_slice_key(k)
+        s, e = slice_bounds(t.length, k['start'], k['end'])
+        return t[s...e]
+      end
+      # validate the key against the container type the same way set_child does
+      case k
+      when String then index_error(t, k) unless t.is_a?(Hash)
+      when Integer, Float then index_error(t, k) unless t.is_a?(Array)
+      when Array then raise JQError, 'Cannot update field at array index of array' if t.is_a?(Array)
+      end
+      index(t, k)
     end
 
     def delpaths(t, paths)
       raise JQError, 'Paths must be specified as an array' unless paths.is_a?(Array)
 
-      Value.sort(paths).reverse_each do |p|
-        raise JQError, 'Path must be specified as an array' unless p.is_a?(Array)
+      normalized = paths.flat_map do |p|
+        raise JQError, "Path must be specified as array, not #{Value.type_name(p)}" unless p.is_a?(Array)
 
-        t = delpath(t, p)
+        check_path(p)
+        normalize_path(t, p)
       end
+      sorted = Value.sort(normalized)
+      sorted = sorted.each_with_index.reject { |q, i| i.positive? && Value.equal?(q, sorted[i - 1]) }.map(&:first)
+      sorted.reverse_each { |p| t = delpath(t, p) }
       t
     end
 
-    def delpath(t, path)
-      return nil if path.empty?
-      return nil if t.nil?
+    # Resolve negative array indices against the value and expand a trailing
+    # slice into its indices, so that deleting several paths at once removes
+    # the elements they referred to in the original value (like jq).
+    # Paths that point outside an array are dropped.
+    def normalize_path(t, path)
+      out = []
+      cur = t
+      path.each_with_index do |k, i|
+        last = i == path.size - 1
+        if cur.is_a?(Array) && Value.number?(k)
+          return [] if k.is_a?(Float) && k.nan?
 
-      k = path[0]
-      if path.size == 1
-        case t
+          k = k.to_f.floor
+          k += cur.length if k.negative?
+          return [] if k.negative? || k >= cur.length
+        elsif cur.is_a?(Array) && k.is_a?(Hash) && last
+          check_slice_key(k)
+          s, e = slice_bounds(cur.length, k['start'], k['end'])
+          return (s...e).map { |j| out + [j] }
+        end
+        out << k
+        break if last
+
+        cur = cur.nil? ? nil : index(cur, k)
+      end
+      [out]
+    end
+
+    def delete_child(t, k)
+      case t
+      when Hash
+        raise JQError, "Cannot delete #{Value.type_name(k)} field of object" unless k.is_a?(String)
+
+        h = t.dup
+        h.delete(k)
+        h
+      when Array
+        case k
+        when Integer, Float
+          idx = k.to_f.floor
+          idx += t.length if idx.negative?
+          raise JQError, 'Out of bounds negative array index' if idx.negative?
+          return t if idx >= t.length
+
+          a = t.dup
+          a.delete_at(idx)
+          a
         when Hash
-          raise JQError, "Cannot delete field at index of object" unless k.is_a?(String)
-
-          h = t.dup
-          h.delete(k)
-          h
-        when Array
-          case k
-          when Integer, Float
-            idx = k.to_f.floor
-            idx += t.length if idx.negative?
-            raise JQError, 'Out of bounds negative array index' if idx.negative?
-            return t if idx >= t.length
-
-            a = t.dup
-            a.delete_at(idx)
-            a
-          when Hash
-            s, e = slice_bounds(t.length, k['start'], k['end'])
-            t[0...s] + t[e..]
-          else
-            raise JQError, "Cannot delete field at index of array"
-          end
+          check_slice_key(k)
+          s, e = slice_bounds(t.length, k['start'], k['end'])
+          t[0...s] + t[e..]
         else
-          raise JQError, "Cannot delete field at index of #{Value.type_name(t)}"
+          raise JQError, "Cannot delete #{Value.type_name(k)} element of array"
         end
       else
-        child = index(t, k)
-        return t if child.nil?
-
-        nc = delpath(child, path[1..])
-        if k.is_a?(Hash)
-          s, e = slice_bounds(t.length, k['start'], k['end'])
-          t[0...s] + nc + t[e..]
-        else
-          setpath(t, [k], nc)
-        end
+        raise JQError, "Cannot delete fields from #{Value.type_name(t)}"
       end
+    end
+
+    # Iterative delete of one path
+    def delpath(t, path)
+      return nil if path.empty?
+
+      containers = [t]
+      cur = t
+      path[0...-1].each do |k|
+        return t if cur.nil?
+
+        cur = index(cur, k)
+        containers << cur
+      end
+      return t if cur.nil?
+
+      v = delete_child(cur, path[-1])
+      (path.size - 2).downto(0) do |i|
+        k = path[i]
+        parent = containers[i]
+        v = if k.is_a?(Hash)
+              s, e = slice_bounds(parent.length, k['start'], k['end'])
+              parent[0...s] + v + parent[e..]
+            else
+              set_child(parent, k, v)
+            end
+      end
+      v
     end
 
     # ------------------------------------------------------------ arithmetic
@@ -278,19 +367,23 @@ module Rbjq
         return nil if n.negative?
 
         n = n.infinite? ? 2**31 : n.floor if n.is_a?(Float)
+        raise JQError, 'Repeat string result too long' if s.bytesize * n > 2_147_483_647
+
         s * n
       elsif l.is_a?(Hash) && r.is_a?(Hash)
-        deep_merge(l, r)
+        deep_merge(l, r, 0)
       else
         raise JQError, "#{Value.desc(l)} and #{Value.desc(r)} cannot be multiplied"
       end
     end
 
-    def deep_merge(a, b)
+    def deep_merge(a, b, depth)
+      raise JQError, 'Object merge too deep' if depth > Value::MAX_DEPTH
+
       out = a.dup
       b.each do |k, v|
         out[k] = if out[k].is_a?(Hash) && v.is_a?(Hash)
-                   deep_merge(out[k], v)
+                   deep_merge(out[k], v, depth + 1)
                  else
                    v
                  end
@@ -341,6 +434,8 @@ module Rbjq
 
     def modulo(l, r)
       if Value.number?(l) && Value.number?(r)
+        return Float::NAN if (l.is_a?(Float) && l.nan?) || (r.is_a?(Float) && r.nan?)
+
         a = to_intmax(l)
         b = to_intmax(r)
         if b.zero?
@@ -349,7 +444,7 @@ module Rbjq
 
         Value.normalize_number(a.remainder(b))
       else
-        raise JQError, "#{Value.desc(l)} and #{Value.desc(r)} cannot be divided"
+        raise JQError, "#{Value.desc(l)} and #{Value.desc(r)} cannot be divided (remainder)"
       end
     end
   end

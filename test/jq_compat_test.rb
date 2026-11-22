@@ -3,7 +3,7 @@
 require_relative 'test_helper'
 require 'json'
 
-# Cases whose expected outputs were recorded from the real jq (1.7.1).
+# Cases whose expected outputs were recorded from the real jq (1.8.2).
 class JqCompatTest < Minitest::Test
   FIXTURE = File.join(__dir__, 'fixtures', 'jq_compat.tsv')
 
