@@ -58,6 +58,13 @@ parser takes about 78ms.
 - Numbers are converted the way jq reads them (`1.0` is `1`), but other jq
   extensions are up to the parser: `JSON.parse` rejects `NaN`, and reads
   `-0` as `0`.
+- `JSON.parse` in json 3.0 and later rejects duplicate keys such as
+  `{"a":1,"a":2}`, and by default it allows 100 levels of nesting where jq
+  allows 10,000. To accept both as jq does (json 2.13 and later):
+
+  ```ruby
+  parser: ->(s) { JSON.parse(s, allow_duplicate_key: true, max_nesting: false) }
+  ```
 - Exceptions from the parser propagate unchanged, such as
   `JSON::ParserError`, instead of `Rbjq::ParseError`.
 
