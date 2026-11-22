@@ -77,6 +77,71 @@ Errors:
 - `Rbjq::JQError`: runtime errors (`#value` holds the error value, e.g. from `error({...})`)
 - `Rbjq::ParseError` (a `JQError`): invalid JSON
 
+#### Building filters in Ruby
+
+`require 'rbjq/expr'` lets you write a filter as Ruby method chains instead
+of a jq string. It is not loaded by `require 'rbjq'`.
+
+```ruby
+require 'rbjq/expr'
+
+r = Rbjq.root
+q = r[:users][].select { _1[:age] > 30 }[:name]
+
+Rbjq.query(data, q)        # compile / query / query_json accept it
+Rbjq.compile(q).source     #=> ".users[] | select(.age > 30).name"
+```
+
+`Rbjq.root` is the program's input. A block or lambda passed to a method is
+a filter, and its parameter is jq's `.` at that point (`_1`, a named
+parameter, or `it` on Ruby 3.4 and later).
+
+| jq | Ruby |
+|---|---|
+| `.a`, `.[0]`, `.[]` | `r[:a]`, `r[0]`, `r[]` |
+| `.[1:3]` | `r[1..2]`, `r[1...3]`, `r.slice(1, 3)` |
+| `.a \| f` | `r[:a].f` |
+| `.a \| [.b, .c]` | `r[:a].then { [_1[:b], _1[:c]] }` |
+| `.a + 1`, `.a > 1`, `-.a` | `r[:a] + 1`, `r[:a] > 1`, `-r[:a]` |
+| `a and b`, `a or b`, `a \| not` | `a.and(b)`, `a.or(b)`, `a.not` or `!a` |
+| `a, b, c` | `a.comma(b, c)` |
+| `.a // 0` | `r[:a].default(0)` |
+| `[.a, 1]`, `{name: .n, (.k): 1}` | `[r[:a], 1]`, `{ name: r[:n], r[:k] => 1 }` |
+| `"hi \(.name)"` | `"hi #{r[:name]}"` |
+| `select(.age > 30)` | `select { _1[:age] > 30 }` |
+| `limit(3; .[])` | `limit(3) { _1[] }` |
+| `until(. > 100; . * 2)` | `until(->(x) { x > 100 }) { _1 * 2 }` |
+| `if c then a elif c2 then b else d end` | `.if(c, a, c2, b, d)` |
+| `f?`, `try f catch g` | `f.try`, `f.try { \|err\| g }` |
+| `f as $x \| g` | `f.as { \|x\| g }` |
+| `f as [$a, $b] \| g`, `f as {k: $v} \| g` | `f.as { \|a, b\| g }`, `f.as(:k) { \|v\| g }` |
+| `reduce .[] as $x (0; . + $x)` | `r[].reduce(0) { \|acc, x\| acc + x }` |
+| `foreach .[] as $x (0; . + $x; [$x, .])` | `r[].foreach(0, ->(acc, x) { [x, acc] }) { \|acc, x\| acc + x }` |
+| `.a = 1`, `.a \|= . + 1` | `r[:a].set(1)`, `r[:a].update { _1 + 1 }` |
+| `.a += 1`, `.a //= 0` | `r[:a].update(:+, 1)`, `r[:a].update(:default, 0)` |
+| anything else | `r[:a].jq('to_entries \| from_entries')` |
+
+- Other methods call the jq function of that name (builtins, `functions:`,
+  `Rbjq.define_function`). Arguments are Ruby values (literals), Exprs, or
+  filters (blocks or lambdas); a block is the last argument. Use
+  `e.call(:name, ...)` for a function whose name is taken by a method above.
+- An Expr always refers to the `.` it was made from. `Rbjq.root` is the
+  outermost input also inside blocks, and a block parameter can be used in
+  nested blocks; the generated program binds them to variables:
+  `r[:users][].select { _1[:age] > r[:min] }` is
+  `. as $__root | .users[] | select(.age > $__root.min)`.
+- A method applies to the whole chain before it: `r[][:a].tonumber.try` is
+  `(.[].a | tonumber)?`, which stops at the first error. For
+  `.[] | (.a | tonumber)?`, write `r[].then { _1[:a].tonumber.try }`.
+- Use `and`/`or`, not `&&`/`||`: Ruby treats every Expr as true. Put the
+  Expr on the left of `==` (`1 == e` is a Ruby comparison).
+- A Ruby Array or String cannot start a chain (`[r[:a]].length` calls
+  Ruby's method); build it inside `then`: `r.then { [_1[:a]] }.length`.
+- An Expr in a String (`"#{e}"`) becomes a signed marker that only the
+  builder turns back into an interpolation, so do not print or store it.
+- Not supported: `def`, `label`/`break`, `?//`, `$__loc__`, `@format`
+  strings, and nested destructuring (use `jq('...')`).
+
 ### Command line
 
 ```sh
