@@ -47,7 +47,7 @@ class FunctionsTest < Minitest::Test
 
     assert_raises(FrozenError) { Rbjq.query({ 'a' => 1 }, '. as $o | mut | $o', functions: mut) }
     assert_raises(FrozenError) { Rbjq.query({ 'a' => [1] }, 'push(.a)', functions: push) }
-    assert_raises(FrozenError) { Rbjq.query('s', 'up', functions: { 'up' => lambda(&:upcase!) }) }
+    assert_raises(FrozenError) { Rbjq.query('s', 'up', functions: { 'up/0' => lambda(&:upcase!) }) }
     # the caller's data is not frozen
     data = { 'a' => [1] }
     Rbjq.query(data, 'id', functions: { 'id' => ->(x) { x } })
