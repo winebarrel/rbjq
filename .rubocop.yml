@@ -46,8 +46,8 @@ Lint/UselessConstantScoping:
   Enabled: false
 
 # Exprs (lib/rbjq/expr.rb) build jq code with Ruby operators and blocks
-# (x > 0, x % 2 == 0, 1 < x, limit(3) { _1[] }); the numeric and block
-# rewrites of these cops would change what the tests build.
+# (x > 0, x % 2 == 0, 1 < x, limit(3) { _1[] }, select { !x }); the numeric
+# and block rewrites of these cops would change what the tests build.
 Style/NumericPredicate:
   Exclude:
     - 'test/expr_test.rb'
@@ -64,5 +64,8 @@ Style/SlicingWithRange:
   Exclude:
     - 'test/expr_test.rb'
 Lint/AmbiguousBlockAssociation:
+  Exclude:
+    - 'test/expr_test.rb'
+Style/InverseMethods:
   Exclude:
     - 'test/expr_test.rb'

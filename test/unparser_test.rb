@@ -37,4 +37,8 @@ class UnparserTest < Minitest::Test
       assert_equal normalize(ast), normalize(Rbjq::Parser.parse(source)), "#{program}\n=> #{source}"
     end
   end
+
+  def test_unknown_node
+    assert_raises(ArgumentError) { Rbjq::Unparser.unparse([:unknown]) }
+  end
 end

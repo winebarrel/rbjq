@@ -34,7 +34,6 @@ module Rbjq
     def gen(node)
       case node[0]
       when :identity then ['.', POSTFIX]
-      when :ctx then ['.', POSTFIX] # an unresolved block parameter (only in Expr#inspect)
       when :literal then literal(node[1])
       when :index then index(node)
       when :iterate then ["#{target(node[1])}[]", POSTFIX]

@@ -43,6 +43,7 @@ class ExprTest < Minitest::Test
     assert_source '.[1:]', r[1..-1]
     assert_source '.a[.i:.j]', r[:a].slice(r[:i], r[:j])
     assert_source '.[:2]', r.slice(nil, 2)
+    assert_source '.[1:]', r.slice(1)
     assert_raises(ArgumentError) { r['a'..'b'] }
     assert_raises(ArgumentError) { r[1, 2] }
   end
@@ -63,9 +64,14 @@ class ExprTest < Minitest::Test
     assert_source '.a != 1', r[:a] != 1
     assert_source '.a < 1, .a <= 1, .a > 1, .a >= 1', (r[:a] < 1).comma(r[:a] <= 1, r[:a] > 1, r[:a] >= 1)
     assert_source '-.a', -r[:a]
+    assert_source '(-.a) * 2', -r[:a] * 2
+    # negative literals parse back as negation, so compare the source and the result
+    assert_equal '(-1) * .a', Rbjq.compile(-1 * r[:a]).source
+    assert_equal [-2], Rbjq.query({ 'a' => 2 }, -1 * r[:a])
     assert_source '1 + .a', 1 + r[:a]
     assert_source '1 < .a', 1 < r[:a]
     assert_source '.a > 1 and .b < 2 or (.c | not)', (r[:a] > 1).and(r[:b] < 2).or(r[:c].not)
+    assert_source '.users[] | select(.admin | not)', r[:users][].select { !_1[:admin] }
     assert_source '.a // 0', r[:a].default(0)
     assert_equal [3, 'x'], Rbjq.query({ 'a' => 1 }, (r[:a] + 2).comma(r[:b].default('x')))
   end
@@ -79,6 +85,20 @@ class ExprTest < Minitest::Test
     assert_source '{a: [1, {b: 2}]}', r.then { { a: [1, { b: 2 }] } }
     assert_equal [{ 'k' => 'v', 'a' => [1, 2] }],
                  Rbjq.query({ 'k' => 'k', 'v' => 'v' }, r.then { { _1[:k] => _1[:v], a: [1, 2] } })
+  end
+
+  def test_other_ruby_values
+    point = Struct.new(:x, :y)
+    time = Time.utc(2026, 1, 2)
+
+    assert_source '"abc"', r.then { :abc }
+    numbers = r.then { [-1, Float::NAN, Float::INFINITY, -Float::INFINITY] }
+
+    assert_equal '[-1, nan, infinite, -infinite]', Rbjq.compile(numbers).source
+    assert_equal '[-1,null,1.7976931348623157e+308,-1.7976931348623157e+308]',
+                 Rbjq.dump_json(Rbjq.query(nil, numbers)[0])
+    assert_source '{x: 1, y: 2}', r.then { point.new(1, 2) }
+    assert_equal [time.to_s], Rbjq.query(nil, r.then { time })
   end
 
   def test_string_interpolation
@@ -123,6 +143,24 @@ class ExprTest < Minitest::Test
     assert_raises(NoMethodError) { e.nil? }
     assert_raises(TypeError) { 'x' + e } # rubocop:disable Style/StringConcatenation
     assert_equal '#<Rbjq::Expr .a>', e.inspect
+    assert e.eql?(e)
+    refute e.eql?(r[:a])
+  end
+
+  def test_inspect_inside_a_block
+    seen = nil
+    r[:a].select do |x|
+      seen = x[:b].inspect
+      true
+    end
+
+    assert_equal '#<Rbjq::Expr .b>', seen
+  end
+
+  # Nodes that the builder and the parser never produce.
+  def test_unknown_nodes
+    assert_raises(ArgumentError) { Rbjq::ExprBuilder.resolve([:unknown], 0, true) }
+    assert_match(/\A<ArgumentError: unknown node :unknown>\z/, Rbjq::ExprBuilder.inspect_source([:unknown]))
   end
 
   def test_functions_option
@@ -164,6 +202,9 @@ class ExprTest < Minitest::Test
     assert_source '.pairs[] as [$k, $v] | {$k: $v}', pairs
     assert_equal [{ 'a' => 1 }, { 'b' => 2 }], Rbjq.query({ 'pairs' => [['a', 1], ['b', 2]] }, pairs)
     assert_raises(ArgumentError) { r.as }
+    # parameters without usable names are bound to $__v<n>
+    assert_source '.a as $__v0 | 1', r[:a].as { 1 }
+    assert_source '.a as $__v0 | 1', r[:a].as { |*| 1 }
   end
 
   def test_reduce_and_foreach
@@ -176,8 +217,11 @@ class ExprTest < Minitest::Test
     assert_source 'reduce .[] as [$a, $b] (0; . + $a * $b)', r[].reduce(0) { |acc, a, b| acc + (a * b) }
     assert_source 'foreach .[] as $x (0; . + $x)', r[].foreach(0) { |acc, x| acc + x }
     assert_source 'foreach .[] as $x (0; . + $x; [$x, .])', running
+    assert_source '. as $__root | foreach .[] as $x (0; . + $x; $__root[0])', r[].foreach(0, r[0]) { |acc, x| acc + x }
     assert_equal [6], Rbjq.query([1, 2, 3], sum)
     assert_equal [[1, 1], [2, 3], [3, 6]], Rbjq.query([1, 2, 3], running)
+    assert_raises(ArgumentError) { r[].reduce(0) }
+    assert_raises(ArgumentError) { r[].foreach(0) }
   end
 
   def test_assignment
@@ -219,13 +263,23 @@ class ExprTest < Minitest::Test
     q = eval('r[:orders].group_by { it[:user] }', binding, __FILE__, __LINE__)
 
     assert_source '.orders | group_by(.user)', q
+    # `it` has no name in Proc#parameters ([[:opt]])
+    assert_source '.a as $__v0 | $__v0', eval('r[:a].as { it }', binding, __FILE__, __LINE__)
   end
 
   def test_escape_hatch
     assert_source '.params | to_entries | map("\(.key)=\(.value)") | join("&")',
                   r[:params].jq('to_entries | map("\(.key)=\(.value)") | join("&")')
     assert_equal [[2, 4]], Rbjq.query([1, 2], r.jq('def f: . * 2; [.[] | f]'))
+    assert_equal [1], Rbjq.query(nil, r.jq('label $out | 1, break $out, 2'))
     assert_raises(Rbjq::CompileError) { r.jq('.a |') }
+  end
+
+  def test_ruby_values_as_the_whole_program
+    e = assert_raises(ArgumentError) { Rbjq.compile([r[:a], 1]) }
+
+    assert_match(/Rbjq\.root\.then/, e.message)
+    assert_source '[.a, 1]', r.then { [r[:a], 1] }
   end
 
   def test_query_apis

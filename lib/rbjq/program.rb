@@ -52,6 +52,11 @@ module Rbjq
         @ast = ExprBuilder.finalize(source.__ast__)
         @source = Unparser.unparse(@ast)
       else
+        unless source.is_a?(String)
+          raise ArgumentError, "filter must be a String or an Rbjq::Expr, not #{source.class} " \
+                               '(to build one from Ruby values, use Rbjq.root.then { ... } from rbjq/expr)'
+        end
+
         @source = source
         @ast = Parser.parse(source)
       end

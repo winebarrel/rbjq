@@ -27,6 +27,7 @@ class RbjqTest < Minitest::Test
     assert_raises(Rbjq::CompileError) { Rbjq.compile('undefined_fn') }
     assert_raises(Rbjq::CompileError) { Rbjq.compile('$nope') }
     assert_raises(Rbjq::CompileError) { Rbjq.compile('break $nope') }
+    assert_raises(ArgumentError) { Rbjq.compile(1) }
   end
 
   def test_runtime_error_value

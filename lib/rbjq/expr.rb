@@ -205,7 +205,7 @@ module Rbjq
           when :ctx
             raise CompileError, 'a block parameter is used outside its block' if strict
 
-            n
+            [:identity] # Expr#inspect inside a block: the block's `.`
           when :ctxvar then [:var, name.call(n)]
           when :pctx then [:pvar, name.call(n)]
           else n.map { |c| walk.call(c) }
@@ -306,6 +306,11 @@ module Rbjq
 
     def -@
       wrap([:neg, @ast])
+    end
+
+    # !e is e | not (BasicObject#! would make it false)
+    def !
+      wrap(ExprBuilder.pipe(@ast, [:call, 'not', []]))
     end
 
     # 1 + e, 1 < e

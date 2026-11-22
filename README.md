@@ -103,7 +103,7 @@ parameter, or `it` on Ruby 3.4 and later).
 | `.a \| f` | `r[:a].f` |
 | `.a \| [.b, .c]` | `r[:a].then { [_1[:b], _1[:c]] }` |
 | `.a + 1`, `.a > 1`, `-.a` | `r[:a] + 1`, `r[:a] > 1`, `-r[:a]` |
-| `a and b`, `a or b`, `a \| not` | `a.and(b)`, `a.or(b)`, `a.not` |
+| `a and b`, `a or b`, `a \| not` | `a.and(b)`, `a.or(b)`, `a.not` or `!a` |
 | `a, b, c` | `a.comma(b, c)` |
 | `.a // 0` | `r[:a].default(0)` |
 | `[.a, 1]`, `{name: .n, (.k): 1}` | `[r[:a], 1]`, `{ name: r[:n], r[:k] => 1 }` |
@@ -133,8 +133,8 @@ parameter, or `it` on Ruby 3.4 and later).
 - A method applies to the whole chain before it: `r[][:a].tonumber.try` is
   `(.[].a | tonumber)?`, which stops at the first error. For
   `.[] | (.a | tonumber)?`, write `r[].then { _1[:a].tonumber.try }`.
-- Use `and`/`or`/`not`, not `&&`/`||`/`!`: Ruby treats every Expr as true.
-  Put the Expr on the left of `==` (`1 == e` is a Ruby comparison).
+- Use `and`/`or`, not `&&`/`||`: Ruby treats every Expr as true. Put the
+  Expr on the left of `==` (`1 == e` is a Ruby comparison).
 - A Ruby Array or String cannot start a chain (`[r[:a]].length` calls
   Ruby's method); build it inside `then`: `r.then { [_1[:a]] }.length`.
 - An Expr in a String (`"#{e}"`) becomes a signed marker that only the
