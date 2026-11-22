@@ -107,24 +107,24 @@ class RbjqTest < Minitest::Test
     assert_equal [nil], q('')
   end
 
-def test_string_escapes_in_programs
-  assert_equal ["\u{1F600}"], q(%q("\ud83d\ude00"))
-  assert_equal ["\uFFFD"], q(%q("\udc00"))
-  assert_raises(Rbjq::CompileError) { Rbjq.compile(%q("\ud83d")) }
-  assert_raises(Rbjq::CompileError) { Rbjq.compile(%q("\u12")) }
-end
+  def test_string_escapes_in_programs
+    assert_equal ["\u{1F600}"], q(%q("\ud83d\ude00"))
+    assert_equal ["\uFFFD"], q(%q("\udc00"))
+    assert_raises(Rbjq::CompileError) { Rbjq.compile(%q("\ud83d")) }
+    assert_raises(Rbjq::CompileError) { Rbjq.compile(%q("\u12")) }
+  end
 
-def test_extreme_exponents
-  assert_equal [-Float::MAX, 0, -0.0], Rbjq.query_json("-1e400 1e-400 -1e-400", ".")
-  assert_equal [-Float::INFINITY], q("-1e400")
-end
+  def test_extreme_exponents
+    assert_equal [-Float::MAX, 0, -0.0], Rbjq.query_json('-1e400 1e-400 -1e-400', '.')
+    assert_equal [-Float::INFINITY], q('-1e400')
+  end
 
-def test_invalid_utf8_is_replaced
-  assert_equal %("\uFFFD"), Rbjq.dump_json("\xFF".b.force_encoding(Encoding::UTF_8))
-  assert_equal "\u{1F600}\uFFFD", Rbjq::Value.scrub_utf8("\xF0\x9F\x98\x80\xF0\x9F")
-end
+  def test_invalid_utf8_is_replaced
+    assert_equal %("\uFFFD"), Rbjq.dump_json("\xFF".b.force_encoding(Encoding::UTF_8))
+    assert_equal "\u{1F600}\uFFFD", Rbjq::Value.scrub_utf8("\xF0\x9F\x98\x80\xF0\x9F")
+  end
 
-def test_unsupported_modules
+  def test_unsupported_modules
     assert_raises(Rbjq::CompileError) { Rbjq.compile('import "a" as a; .') }
     assert_raises(Rbjq::CompileError) { Rbjq.compile('include "a"; .') }
   end
