@@ -278,7 +278,8 @@ module Rbjq
       @ast
     end
 
-    # e[:a] is .a, e[0] is .[0], e[] is .[], e[1..2] is .[1:3]
+    # e[:a] is .a, e[0] is .[0], e[] is .[], e[1..2] is .[1:3],
+    # e[:a, :b] is .["a", "b"] (outputs .a, then .b)
     def [](*args)
       case args.size
       when 0 then wrap(ExprBuilder.postfix(@ast) { |t| [:iterate, t] })
@@ -289,7 +290,7 @@ module Rbjq
         key = ExprBuilder.key(k)
         wrap(ExprBuilder.postfix(@ast, key) { |t| [:index, t, key] })
       else
-        ::Kernel.raise ::ArgumentError, "wrong number of arguments (given #{args.size}, expected 0..1)"
+        multi_index(args)
       end
     end
 
@@ -438,6 +439,16 @@ module Rbjq
 
     def wrap(ast)
       Expr.new(ast)
+    end
+
+    # Numbers are rejected: e[1, 2] reads as start and length in Ruby.
+    def multi_index(keys)
+      if keys.any? { |k| ::Numeric === k || ::Range === k }
+        ::Kernel.raise ::ArgumentError, "keys must be Symbols, Strings or Exprs: #{keys.inspect}"
+      end
+
+      key = keys.map { |k| ExprBuilder.key(k) }.reduce { |a, b| [:comma, a, b] }
+      wrap([:index, @ast, key])
     end
 
     def range_slice(range)

@@ -35,6 +35,18 @@ class ExprTest < Minitest::Test
     assert_source '.a[.i]', r[:a][r[:i]]
   end
 
+  def test_multiple_keys
+    assert_source '.["b", "c"]', r[:b, :c]
+    assert_source '.a["b", "c", "d"]', r[:a]['b', :c, :d]
+    assert_source '.a | [.["b", "c"]]', r[:a].then { [_1[:b, :c]] }
+    assert_source '.[.k, "c"]', r[r[:k], :c]
+    assert_equal [1, 2], Rbjq.query({ 'b' => 1, 'c' => 2 }, r[:b, :c])
+    assert_equal [{ 'b' => 2, 'c' => 3, 'd' => 4 }],
+                 Rbjq.query({ 'b' => 1, 'c' => 2, 'd' => 4 }, r[:b, :c].update { _1 + 1 })
+    assert_raises(ArgumentError) { r[1, 2] }
+    assert_raises(ArgumentError) { r[:a, 1..2] }
+  end
+
   def test_slice
     assert_source '.[1:3]', r[1..2]
     assert_source '.[1:3]', r[1...3]
@@ -45,7 +57,6 @@ class ExprTest < Minitest::Test
     assert_source '.[:2]', r.slice(nil, 2)
     assert_source '.[1:]', r.slice(1)
     assert_raises(ArgumentError) { r['a'..'b'] }
-    assert_raises(ArgumentError) { r[1, 2] }
   end
 
   def test_pipe

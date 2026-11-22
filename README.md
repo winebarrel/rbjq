@@ -99,6 +99,7 @@ parameter, or `it` on Ruby 3.4 and later).
 | jq | Ruby |
 |---|---|
 | `.a`, `.[0]`, `.[]` | `r[:a]`, `r[0]`, `r[]` |
+| `.["a", "b"]` (outputs `.a`, then `.b`) | `r[:a, :b]` (`r.then { [_1[:a, :b]] }` for `[.a, .b]`) |
 | `.[1:3]` | `r[1..2]`, `r[1...3]`, `r.slice(1, 3)` |
 | `.a \| f` | `r[:a].f` |
 | `.a \| [.b, .c]` | `r[:a].then { [_1[:b], _1[:c]] }` |
