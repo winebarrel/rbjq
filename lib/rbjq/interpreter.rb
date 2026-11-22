@@ -541,7 +541,7 @@ module Rbjq
     # ---------------------------------------------------------- functions
 
     def call_function(node, input, path, env, &)
-      key = (node[3] ||= "#{node[1]}/#{node[2].size}")
+      key = "#{node[1]}/#{node[2].size}"
       e = Env.lookup(env, :func, key)
       if e
         f = e.value
@@ -669,15 +669,11 @@ module Rbjq
     end
 
     def deferrable?(node)
-      cache = (@deferrable ||= {}.compare_by_identity)
-      return cache[node] if cache.key?(node)
-
-      cache[node] =
-        case node[0]
-        when :call then !STREAMING_CALLS.include?(node[1])
-        when :pipe then single?(node[1]) && deferrable?(node[2])
-        else false
-        end
+      case node[0]
+      when :call then !STREAMING_CALLS.include?(node[1])
+      when :pipe then single?(node[1]) && deferrable?(node[2])
+      else false
+      end
     end
 
     # Statically known to produce exactly one output (or an error).

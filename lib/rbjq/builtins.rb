@@ -980,8 +980,6 @@ module Rbjq
 
     # ------------------------------------------------------------- regex
 
-    REGEX_CACHE = {} # rubocop:disable Style/MutableConstant -- a cache
-
     def translate_regex(re)
       out = +''
       i = 0
@@ -1028,10 +1026,6 @@ module Rbjq
       err("#{Value.desc(re)} is not a string") unless re.is_a?(String)
       err("#{Value.desc(flags)} is not a string") unless flags.nil? || flags.is_a?(String)
 
-      key = [re, flags]
-      cached = REGEX_CACHE[key]
-      return cached if cached
-
       global = false
       noempty = false
       opts = 0
@@ -1056,8 +1050,7 @@ module Rbjq
       regexp.named_captures.each do |name, idxs|
         idxs.each { |i| names[i] = name.start_with?('__rbjq_') ? nil : name }
       end
-      REGEX_CACHE.clear if REGEX_CACHE.size > 1000
-      REGEX_CACHE[key] = [regexp, global, noempty, names]
+      [regexp, global, noempty, names]
     end
 
     def match_all(str, re, flags)
