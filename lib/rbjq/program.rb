@@ -41,12 +41,16 @@ module Rbjq
     attr_reader :source, :ast
 
     # vars: Hash of variable name (without '$') => value
+    # functions: Hash of name => callable, jq functions implemented in Ruby
+    #   (see Rbjq::Functions); they take precedence over functions defined
+    #   with Rbjq.define_function, which are captured at this point
     # options: :stderr (IO for debug/stderr), :filename_proc
-    def initialize(source, vars: {}, **options)
+    def initialize(source, vars: {}, functions: {}, **options)
       @source = source
       @ast = Parser.parse(source)
       @vars = vars.each_with_object({}) { |(k, v), h| h[k.to_s.delete_prefix('$')] = self.class.normalize_value(v) }
-      Checker.new(self.class.known_functions).check(@ast, @vars.keys)
+      @functions = Functions.global.merge(Functions.build_all(functions))
+      Checker.new(self.class.known_functions | @functions.keys).check(@ast, @vars.keys)
       @options = options
       # Holding back an operand's first output (see Interpreter#each_operand)
       # would reorder side effects, so keep strict streaming for such programs.
@@ -61,7 +65,8 @@ module Rbjq
       return enum_for(:each, input, inputs: inputs) unless blk
 
       interp = Interpreter.new(prelude: self.class.prelude, natives: Builtins::NATIVES,
-                               options: @options.merge(defer_operands: !@side_effects))
+                               options: @options.merge(defer_operands: !@side_effects),
+                               functions: @functions)
       interp.input_provider = make_provider(inputs) if inputs
       env = nil
       @vars.each { |k, v| env = Env.bind_var(env, k, v) }

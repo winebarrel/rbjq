@@ -22,8 +22,9 @@ module Rbjq
     attr_reader :options
     attr_accessor :input_provider, :global_env
 
-    def initialize(prelude:, natives:, options: {})
+    def initialize(prelude:, natives:, options: {}, functions: {})
       @prelude = prelude
+      @functions = functions
       @natives = natives
       @options = options
       @global_env = nil
@@ -550,6 +551,8 @@ module Rbjq
         else
           call_funcdef(f, node[2], input, path, env, &)
         end
+      elsif (rf = @functions[key])
+        rf.call(self, input, path, node[2], env, &)
       elsif (f = @prelude[key])
         call_funcdef(f, node[2], input, path, env, &)
       elsif (nf = @natives[key])
