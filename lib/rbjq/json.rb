@@ -40,7 +40,8 @@ module Rbjq
 
     def initialize(src)
       src = src.dup.force_encoding(Encoding::UTF_8)
-      src = src.scrub("�") unless src.valid_encoding?
+      src = Value.scrub_utf8(src) unless src.valid_encoding?
+      src = src.delete_prefix("﻿") # byte order mark
       @src = src
       @s = StringScanner.new(src)
       @counted_pos = 0
@@ -97,91 +98,175 @@ module Rbjq
       when '"'
         @s.pos += 1
         parse_string
-      when 't'
-        @s.skip(/true/) or error('Invalid literal')
-        true
-      when 'f'
-        @s.skip(/false/) or error('Invalid literal')
-        false
-      when 'n'
-        if @s.skip(/null/)
-          nil
-        elsif @s.skip(/nan/)
-          Float::NAN
-        else
-          error('Invalid literal')
-        end
-      when 'N'
-        @s.skip(/NaN/) or error('Invalid literal')
-        Float::NAN
       when ''
         error('Unfinished JSON term at EOF')
+      when ']' then fail_at_char("Unmatched ']'")
+      when '}' then fail_at_char("Unmatched '}'")
+      when ':' then fail_at_char("Expected string key before ':'")
+      when ',' then fail_at_char("Expected value before ','")
+      when "'"
+        @s.skip(LITERAL)
+        error_after_token(%(Invalid string literal; expected ", but got '))
       else
-        if (n = @s.scan(NUMBER))
-          if @s.match?(/[a-zA-Z0-9_]/)
-            error('Invalid numeric literal')
-          end
-          parse_number(n)
-        else
-          error('Invalid numeric literal')
-        end
+        parse_literal
+      end
+    end
+
+    # Characters of a bare token (anything up to a delimiter), like jq's tokenizer
+    LITERAL = /[^ \t\r\n\[\]{},:"]+/
+    NUMBER_LITERAL = /\A[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?\z/
+
+    def parse_literal
+      tok = @s.scan(LITERAL) or error('Unfinished JSON term at EOF')
+      case tok
+      when 'true' then true
+      when 'false' then false
+      when 'null' then nil
+      when 'nan', 'NaN', '-nan', '-NaN' then Float::NAN
+      when 'Infinity', 'infinity' then Float::MAX
+      when '-Infinity', '-infinity' then -Float::MAX
+      else
+        return parse_number(tok) if tok.match?(NUMBER_LITERAL)
+
+        error_after_token(%w[t f n].include?(tok[0]) ? 'Invalid literal' : 'Invalid numeric literal')
       end
     end
 
     def parse_number(n)
-      if n.include?('.') || n.include?('e') || n.include?('E')
-        f = n.to_f
+      n = n.delete_prefix('+')
+      if n.match?(/[.eE]/)
+        f = Value.parse_float(n.sub(/\A(-?)\./, '\10.').sub(/\.(?![0-9])/, '.0'))
         f = Float::MAX if f == Float::INFINITY
         f = -Float::MAX if f == -Float::INFINITY
         Value.normalize_number(f)
       else
-        i = n.to_i
-        # keep large integer literals exact (like jq 1.7 literal preservation)
-        i
+        # like jq without decNumber, numbers are doubles
+        return -0.0 if n.match?(/\A-0+\z/)
+
+        Value.normalize_number(n.to_i)
       end
+    end
+
+    # jq reports errors in a bare token after reading the delimiter that ends it
+    def error_after_token(msg)
+      if @s.eos?
+        error("#{msg} at EOF")
+      else
+        raise ParseError, "#{msg} at line #{line}, column #{column + 1}"
+      end
+    end
+
+    # jq reports a misplaced token after reading it (and its delimiter)
+    def unexpected_token(msg)
+      if @s.skip(LITERAL)
+        error_after_token(msg)
+      elsif @s.peek(1) == '"'
+        @s.pos += 1
+        parse_string
+        raise ParseError, "#{msg} at line #{line}, column #{column}"
+      else
+        fail_at_char(msg)
+      end
+    end
+
+    # report an error after consuming the current (structural) character
+    def fail_at_char(msg)
+      @s.getch
+      raise ParseError, "#{msg} at line #{line}, column #{column}"
+    end
+
+    MAX_PARSING_DEPTH = 10_000
+
+    def enter
+      @depth = (@depth || 0) + 1
+      error('Exceeds depth limit for parsing') if @depth > MAX_PARSING_DEPTH
+    end
+
+    def leave
+      @depth -= 1
     end
 
     def parse_object
       @s.pos += 1
+      enter
       h = {}
       @s.skip(WS)
-      return h if @s.skip(/\}/)
+      if @s.skip(/\}/)
+        leave
+        return h
+      end
 
       loop do
         @s.skip(WS)
-        error('Object keys must be strings') unless @s.skip(/"/)
+        error('Unfinished JSON term at EOF') if @s.eos?
+        if @s.peek(1) == "'"
+          @s.skip(LITERAL)
+          error_after_token(%(Invalid string literal; expected ", but got '))
+        end
+        unless @s.skip(/"/)
+          case @s.peek(1)
+          when '}' then fail_at_char('Expected another key-value pair')
+          when ',' then fail_at_char("Expected value before ','")
+          when ']' then fail_at_char("Unmatched ']'")
+          end
+          error_after_token('Object keys must be strings') if @s.skip(LITERAL)
+          error('Object keys must be strings')
+        end
         k = parse_string
         @s.skip(WS)
-        error("Objects must consist of key:value pairs") unless @s.skip(/:/)
+        error('Unfinished JSON term at EOF') if @s.eos?
+        unless @s.skip(/:/)
+          fail_at_char('Objects must consist of key:value pairs') if @s.peek(1) == ','
+          unexpected_token('Expected separator between values')
+        end
         h[k] = parse_value
         @s.skip(WS)
         next if @s.skip(/,/)
         break if @s.skip(/\}/)
 
-        error(@s.eos? ? 'Unfinished JSON term at EOF' : "Expected separator between values")
+        error('Unfinished JSON term at EOF') if @s.eos?
+        fail_at_char("Unmatched ']'") if @s.peek(1) == ']'
+        unexpected_token('Expected separator between values')
       end
+      leave
       h
     end
 
     def parse_array
       @s.pos += 1
+      enter
       a = []
       @s.skip(WS)
-      return a if @s.skip(/\]/)
+      if @s.skip(/\]/)
+        leave
+        return a
+      end
 
       loop do
+        @s.skip(WS)
+        case @s.peek(1)
+        when ']' then fail_at_char('Expected another array element')
+        when ',' then fail_at_char("Expected value before ','")
+        end
         a << parse_value
         @s.skip(WS)
         next if @s.skip(/,/)
         break if @s.skip(/\]/)
 
-        error(@s.eos? ? 'Unfinished JSON term at EOF' : 'Expected separator between values')
+        error('Unfinished JSON term at EOF') if @s.eos?
+        fail_at_char('Objects must consist of key:value pairs') if @s.peek(1) == '}'
+        fail_at_char("':' not as part of an object") if @s.peek(1) == ':'
+        unexpected_token('Expected separator between values')
       end
+      leave
       a
     end
 
+    # Like jq, the whole string is read first, then validated; errors are
+    # reported at the closing quote.
     def parse_string
       buf = +''
+      failure = nil
       loop do
         if (chunk = @s.scan(STR_CHUNK))
           buf << chunk
@@ -189,32 +274,40 @@ module Rbjq
         c = @s.getch
         case c
         when '"'
+          error(failure) if failure
           return buf
         when '\\'
           e = @s.getch
           if (r = ESCAPES[e])
             buf << r
           elsif e == 'u'
-            hex = @s.scan(/[0-9a-fA-F]{4}/) or error('Invalid escape')
+            hex = @s.scan(/[0-9a-fA-F]{4}/)
+            unless hex
+              failure ||= 'Invalid \\uXXXX escape'
+              next
+            end
             cp = hex.to_i(16)
             if cp >= 0xD800 && cp <= 0xDBFF
               if @s.match?(/\\u[dD][c-fC-F][0-9a-fA-F]{2}/)
                 lo = @s.scan(/\\u..../)[2..].to_i(16)
                 cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00)
               else
-                cp = 0xFFFD
+                failure ||= 'Invalid \\uXXXX\\uXXXX surrogate pair escape'
+                next
               end
             elsif cp >= 0xDC00 && cp <= 0xDFFF
               cp = 0xFFFD
             end
             buf << cp.chr(Encoding::UTF_8)
+          elsif e.nil?
+            error('Unfinished string at EOF')
           else
-            error('Invalid escape')
+            failure ||= 'Invalid escape'
           end
         when nil
-          error('Unfinished JSON term at EOF')
+          error('Unfinished string at EOF')
         else
-          # control character inside a string: accept as-is (jq rejects some)
+          failure ||= 'Invalid string: control characters from U+0000 through U+001F must be escaped'
           buf << c
         end
       end
@@ -225,7 +318,7 @@ module Rbjq
   class Encoder
     DEFAULT_COLORS = {
       null: '0;90', false: '0;39', true: '0;39', number: '0;39', string: '0;32',
-      array: '1;39', object: '1;39', key: '34;1'
+      array: '1;39', object: '1;39', key: '1;34'
     }.freeze
     COLOR_KEYS = %i[null false true number string array object key].freeze
 
@@ -245,14 +338,15 @@ module Rbjq
       colors
     end
 
-    def initialize(indent: 0, tab: false, sort_keys: false, ascii: false, color: false, colors: nil)
+    # pretty: nil means pretty-print when indenting (indent > 0 or tab)
+    def initialize(indent: 0, tab: false, sort_keys: false, ascii: false, color: false, colors: nil, pretty: nil)
       @indent = indent
       @tab = tab
       @sort_keys = sort_keys
       @ascii = ascii
       @color = color
       @colors = colors || DEFAULT_COLORS
-      @pretty = tab || indent.positive?
+      @pretty = pretty.nil? ? (tab || indent.positive?) : pretty
     end
 
     def encode(v)
@@ -346,7 +440,14 @@ module Rbjq
       buf << (@tab ? "\t" * level : ' ' * (@indent * level))
     end
 
+    MAX_PRINT_DEPTH = 10_000
+
     def write(buf, v, level)
+      if level > MAX_PRINT_DEPTH
+        buf << '<skipped: too deep>'
+        return
+      end
+
       case v
       when nil
         scalar(buf, :null, 'null')
@@ -375,64 +476,46 @@ module Rbjq
       end
     end
 
+    # Colored output follows jq 1.8: every bracket and separator is colored
+    # and immediately reset.
+    def punct(buf, c, text)
+      if c
+        buf << c << text << RESET
+      else
+        buf << text
+      end
+    end
+
     def write_array(buf, v, level)
       c = @color ? col(:array) : nil
-      if v.empty?
-        buf << c if c
-        buf << '[]'
-        buf << RESET if c
-        return
-      end
-      buf << c if c
-      buf << '['
+      return punct(buf, c, '[]') if v.empty?
+
+      punct(buf, c, '[')
       v.each_with_index do |e, i|
-        if i.positive?
-          buf << c if c
-          buf << ','
-        end
+        punct(buf, c, ',') if i.positive?
         newline_indent(buf, level + 1)
         write(buf, e, level + 1)
       end
-      buf << c if c
       newline_indent(buf, level)
-      buf << c if c
-      buf << ']'
-      buf << RESET if c
+      punct(buf, c, ']')
     end
 
     def write_object(buf, v, level)
       c = @color ? col(:object) : nil
-      if v.empty?
-        buf << c if c
-        buf << '{}'
-        buf << RESET if c
-        return
-      end
-      buf << c if c
-      buf << '{'
+      return punct(buf, c, '{}') if v.empty?
+
+      punct(buf, c, '{')
       keys = @sort_keys ? v.keys.sort_by(&:b) : v.keys
       keys.each_with_index do |k, i|
-        if i.positive?
-          buf << c if c
-          buf << ','
-        end
+        punct(buf, c, ',') if i.positive?
         newline_indent(buf, level + 1)
-        if c
-          buf << RESET << col(:key) << Encoder.escape_string(k, @ascii) << RESET
-          buf << c << ':'
-          buf << ' ' if @pretty
-          buf << RESET
-        else
-          buf << Encoder.escape_string(k, @ascii) << ':'
-          buf << ' ' if @pretty
-        end
+        punct(buf, c && col(:key), Encoder.escape_string(k, @ascii))
+        punct(buf, c, ':')
+        buf << ' ' if @pretty
         write(buf, v[k], level + 1)
       end
-      buf << c if c
       newline_indent(buf, level)
-      buf << c if c
-      buf << '}'
-      buf << RESET if c
+      punct(buf, c, '}')
     end
   end
 end

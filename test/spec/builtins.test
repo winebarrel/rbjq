@@ -1,0 +1,539 @@
+# Expected outputs were recorded from jq 1.8.2.
+# Format: program, input, expected outputs, blank line (like jq's tests/*.test).
+
+[.[] | try length catch .]
+[null, true, false, 0, -1.5, "aé", [1,2], {"a":1}]
+[0,"boolean (true) has no length","boolean (false) has no length",0,1.5,2,2,1]
+
+[.[] | try utf8bytelength catch .]
+["aé😀", 1, null]
+[7,"number (1) only strings have UTF-8 byte length","null (null) only strings have UTF-8 byte length"]
+
+[.[] | try keys catch .]
+[{"b":1,"a":2}, [5,6], "x", 1, null]
+[["a","b"],[0,1],"string (\"x\") has no keys","number (1) has no keys","null (null) has no keys"]
+
+[.[] | try keys_unsorted catch .]
+[{"b":1,"a":2}, [5,6], true]
+[["b","a"],[0,1],"boolean (true) has no keys"]
+
+[.[] as [$v, $k] | try ($v | has($k)) catch .]
+[[{"a":1}, "a"], [{"a":1}, "b"], [[1,2], 1], [[1,2], 2], [[1,2], -1], ["x", 0], [{"a":1}, 0], [[1], "a"], [null, "a"]]
+[true,false,true,false,false,"Cannot check whether string has a number key","Cannot check whether object has a number key","Cannot check whether array has a string key",false]
+
+[.[] | in({"a":1})], [.[] | in([0,1])]
+["a", "b"]
+[true,false]
+
+[.[] as [$a, $b] | try ($a | contains($b)) catch .]
+[["foobar","bar"], [[1,2,3],[1,3]], [{"a":{"b":1,"c":2}},{"a":{"b":1}}], [1,1], [true,false], [1,"1"], [[1,[2]],[[2]]], [null,null], ["a",["a"]]]
+[true,true,true,true,"boolean (true) and boolean (false) cannot have their containment checked","number (1) and string (\"1\") cannot have their containment checked",true,true,"string (\"a\") and array ([\"a\"]) cannot have their containment checked"]
+
+[.[] as [$a, $b] | try ($a | inside($b)) catch .]
+[["bar","foobar"], [[1],[1,2]], [{"a":1},{"a":1,"b":2}]]
+[true,true,true]
+
+[.[] | type]
+[null, true, 1, 1.5, "s", [], {}]
+["null","boolean","number","number","string","array","object"]
+
+[.[] | [isinfinite, isnan, isnormal, isfinite]]
+[1, 0, 1e-320, 1.7976931348623157e308]
+[[false,false,true,true],[false,false,false,true],[false,false,false,true],[false,false,true,true]]
+
+[infinite, -infinite, nan | [isinfinite, isnan]]
+null
+[[true,false],[true,false],[false,true]]
+
+[.[] | finites], [.[] | normals]
+[1, 0, 2.5]
+[1,0,2.5]
+[1,2.5]
+
+[.[] | try isnan catch .]
+["x"]
+[false]
+
+[.[] | scalars], [.[] | iterables], [.[] | values], [.[] | nulls], [.[] | booleans], [.[] | numbers], [.[] | strings], [.[] | arrays], [.[] | objects]
+[1, "a", null, true, [1], {"a":1}]
+[1,"a",null,true]
+[[1],{"a":1}]
+[1,"a",true,[1],{"a":1}]
+[null]
+[true]
+[1]
+["a"]
+[[1]]
+[{"a":1}]
+
+[.[] | tostring]
+[1, 1.5, "s", [1,"a"], {"a":null}, null, true]
+["1","1.5","s","[1,\"a\"]","{\"a\":null}","null","true"]
+
+[.[] | tojson]
+[1, "s\n\"", [1,{"a":[]}], null]
+["1","\"s\\n\\\"\"","[1,{\"a\":[]}]","null"]
+
+[.[] | try fromjson catch .]
+["[1,2]", "{\"a\":1}", "nan", "  1  ", "[1,", "1 2", "{\"a\" 1}", "tru", "\"\\u00e9\"", "{\"a\":1,}", "[1 2]", "\"abc", "01", "-"]
+[[1,2],{"a":1},null,1,"Unfinished JSON term at EOF at line 1, column 3 (while parsing '[1,')","Unexpected extra JSON values (while parsing '1 2')","Expected separator between values at line 1, column 7 (while parsing '{\"a\" 1}')","Invalid literal at EOF at line 1, column 3 (while parsing 'tru')","é","Expected another key-value pair at line 1, column 8 (while parsing '{\"a\":1,}')","Expected separator between values at line 1, column 5 (while parsing '[1 2]')","Unfinished string at EOF at line 1, column 4 (while parsing '\"abc')",1,"Invalid numeric literal at EOF at line 1, column 1 (while parsing '-')"]
+
+[.[] | try tonumber catch .]
+["1", "-1.5", "1e2", " 2 ", "0x10", "abc", "", 5, null, [1], {}, "+3", ".5", "1."]
+[1,-1.5,1E+2,"string (\" 2 \") cannot be parsed as a number","string (\"0x10\") cannot be parsed as a number","string (\"abc\") cannot be parsed as a number","string (\"\") cannot be parsed as a number",5,"null (null) cannot be parsed as a number","array ([1]) cannot be parsed as a number","object ({}) cannot be parsed as a number",3,0.5,1]
+
+[.[] | try toboolean catch .]
+["true", "false", true, false, "x", 1, null]
+[true,false,true,false,"string (\"x\") cannot be parsed as a boolean","number (1) cannot be parsed as a boolean","null (null) cannot be parsed as a boolean"]
+
+[.[] | try add catch .]
+[[1,2], ["a","b"], [[1],[2]], [{"a":1},{"b":2}], [], [null, 1], {"a":1,"b":2}, "x", 1, null]
+[3,"ab",[1,2],{"a":1,"b":2},null,1,3,"Cannot iterate over string (\"x\")","Cannot iterate over number (1)","Cannot iterate over null (null)"]
+
+add(.[].a), add(empty)
+[{"a":1},{"a":2}]
+3
+null
+
+[.[] | try flatten catch .]
+[[1,[2,[3]]], [], "x", {"a":[1,[2]]}]
+[[1,2,3],[],"Cannot iterate over string (\"x\")",[1,2]]
+
+[.[] as [$a, $d] | try ($a | flatten($d)) catch .]
+[[[1,[2,[3]]], 0], [[1,[2,[3]]], 1], [[1,[2]], -1]]
+[[1,[2,[3]]],[1,2,[3]],"flatten depth must not be negative"]
+
+[.[] | try reverse catch .]
+[[1,2,3], "abc", null, [], {}, ""]
+[[3,2,1],"Cannot index string with number (2)",[],[],[],[]]
+
+[.[] | try sort catch .]
+[[3,1,2], [{"b":1},{"a":2}], "x", {"a":1}]
+[[1,2,3],[{"a":2},{"b":1}],"string (\"x\") cannot be sorted, as it is not an array","object ({\"a\":1}) cannot be sorted, as it is not an array"]
+
+[.[] | try unique catch .]
+[[1,2,1,"a","a",null,null], [], "x"]
+[[null,1,2,"a"],[],"string (\"x\") cannot be sorted, as it is not an array"]
+
+[.[] | try min catch .], [.[] | try max catch .]
+[[3,1,2], [], ["b","a"], "x"]
+[1,null,"a","string (\"x\") and string (\"x\") cannot be iterated over"]
+[3,null,"b","string (\"x\") and string (\"x\") cannot be iterated over"]
+
+min_by(.a), max_by(.a), min_by(.b), max_by(.b)
+[{"a":1,"b":3},{"a":3,"b":3},{"a":2,"b":3},{"a":3,"b":1}]
+{"a":1,"b":3}
+{"a":3,"b":1}
+{"a":3,"b":1}
+{"a":2,"b":3}
+
+[.[] | try min_by(.) catch .]
+["x", {}, []]
+["Cannot iterate over string (\"x\")","object ({}) and array ([]) cannot be iterated over",null]
+
+sort_by(.a, .b), sort_by(.a), group_by(.a), unique_by(.a)
+[{"a":2,"b":1},{"a":1,"b":2},{"a":2,"b":0},{"a":1,"b":1}]
+[{"a":1,"b":1},{"a":1,"b":2},{"a":2,"b":0},{"a":2,"b":1}]
+[{"a":1,"b":2},{"a":1,"b":1},{"a":2,"b":1},{"a":2,"b":0}]
+[[{"a":1,"b":2},{"a":1,"b":1}],[{"a":2,"b":1},{"a":2,"b":0}]]
+[{"a":1,"b":2},{"a":2,"b":1}]
+
+[.[] | try group_by(.) catch .]
+["x", 1]
+["Cannot iterate over string (\"x\")","Cannot iterate over number (1)"]
+
+[.[] as [$a, $x] | $a | try indices($x) catch .]
+[["abcabc","bc"], ["aaaa","aa"], ["abc",""], [[1,2,1,2,1],[1,2]], [[1,2,1],1], [[1,2],[]], [null,1], [{"a":1},"a"], ["aéb","b"]]
+[[1,4],[0,1,2],[],[0,2],[0,2],[],null,1,[2]]
+
+[.[] as [$a, $x] | $a | index($x), rindex($x)]
+[["abcabc","bc"], [[1,2,1],1], ["abc","z"], [null,1]]
+[1,4,0,2,null,null,null,null]
+
+[.[] | try transpose catch .]
+[[[1,2],[3]], [], [[],[1]]]
+[[[1,3],[2,null]],[],[[null,1]]]
+
+[.[] | try [combinations] catch .]
+[[[1,2],[3]], [[1],[]], [[]], [1]]
+[[[1,3],[2,3]],[],[],"Cannot iterate over number (1)"]
+
+[combinations(2)]
+[0,1]
+[[0,0],[0,1],[1,0],[1,1]]
+
+[.[] as [$a,$t] | $a | bsearch($t)]
+[[[1,2,3],2], [[1,2,3],0], [[1,2,3],4], [[1,3,5],4], [[],1], [[1],1], [[1,2,3,4],4]]
+[1,-1,-4,-3,-1,0,3]
+
+[.[] | try bsearch(1) catch .]
+["x", {}]
+["string (\"x\") cannot be searched from","object ({}) cannot be searched from"]
+
+[.[] | try implode catch .]
+[[65,233,128512], [1114112], [-1], [55296], "x", ["a"], [65.9], [[1]], [null]]
+["Aé😀","�","�","�","implode input must be an array","string (\"a\") can't be imploded, unicode codepoint needs to be numeric","A","array ([1]) can't be imploded, unicode codepoint needs to be numeric","null (null) can't be imploded, unicode codepoint needs to be numeric"]
+
+[.[] | try explode catch .]
+["aé😀", 1]
+[[97,233,128512],"explode input must be a string"]
+
+[.[] | try join(",") catch .]
+[["a",1,null,true,false], [], ["a"], [[1]], [{"a":1}], "x", {"a":"x","b":"y"}]
+["a,1,,true,false","","a","string (\"\") and array ([1]) cannot be added","string (\"\") and object ({\"a\":1}) cannot be added","Cannot iterate over string (\"x\")","x,y"]
+
+[.[] | try join(1) catch .]
+[["a","b"]]
+["string (\"a\") and number (1) cannot be added"]
+
+[.[] | try getpath(["a",0]) catch .]
+[{"a":[1]}, {"a":null}, null, {"a":"x"}, [1]]
+[1,null,null,"Cannot index string with number (0)","Cannot index array with string (\"a\")"]
+
+[.[] | try getpath("a") catch .]
+[{}]
+["Path must be specified as an array"]
+
+[.[] as [$v,$p,$x] | try ($v | setpath($p; $x)) catch .]
+[[null,["a",1],2], [{"a":1},["a"],2], [[1],[3],2], [[1],[-1],9], [[1],[-3],9], [1,["a"],2], [{"a":1},[0],2], [[1,2,3],[{"start":1,"end":2}],["x","y"]], [[1,2,3],[{"start":1,"end":null}],"x"], ["abc",[{"start":1,"end":2}],"x"], [null,[null],1], [{},[true],1], [{},"a",1], [[],[[1]],1], [[],[{}],1], [{},[{"start":0,"end":1}],1]]
+[{"a":[null,2]},{"a":2},[1,null,null,2],[9],"Out of bounds negative array index","Cannot index number with string (\"a\")","Cannot index object with number (0)",[1,"x","y",3],"A slice of an array can only be assigned another array","Cannot update string slices","Cannot index null with null (null)","Cannot index object with boolean (true)","Path must be specified as an array","Cannot update field at array index of array","Array/string slice indices must be integers","Cannot index object with object ({\"start\":0,\"end\":1})"]
+
+[.[] as [$v,$p] | try ($v | delpaths($p)) catch .]
+[[{"a":1,"b":2},[["a"]]], [[1,2,3],[[0],[0]]], [[1,2,3],[[-1]]], [[1,2,3,4],[[{"start":1,"end":3}]]], [null,[["a"]]], [{"a":[1,2]},[["a",0],["a",1]]], [[1],[[]]], [{"a":1},"x"], [{"a":1},["a"]], [1,[["a"]]], [{"a":1},[[0]]], [[1],[["a"]]], ["x",[[0]]], [[1],[[{}]]]]
+[{"b":2},[2,3],[1,2],[1,4],null,{"a":[]},null,"Paths must be specified as an array","Path must be specified as array, not string","Cannot delete fields from number","Cannot delete number field of object","Cannot delete string element of array","Cannot delete fields from string","Array/string slice indices must be integers"]
+
+[.[] | try to_entries catch .], [.[] | try from_entries catch .]
+[{"a":1}, [3], "x"]
+[[{"key":"a","value":1}],[{"key":0,"value":3}],"string (\"x\") has no keys"]
+["Cannot index number with string (\"key\")","Cannot index number with string (\"key\")","Cannot iterate over string (\"x\")"]
+
+[.[] | try from_entries catch .]
+[[{"key":"a","value":1},{"Key":"b","Value":2},{"name":"c","value":3},{"Name":"d","value":4}], [{"key":false,"value":1}], [{"key":1}], [{"k":"a"}], [{"key":"a"}], [1], [null]]
+[{"a":1,"b":2,"c":3,"d":4},"Cannot use null (null) as object key","Cannot use number (1) as object key","Cannot use null (null) as object key",{"a":null},"Cannot index number with string (\"key\")","Cannot use null (null) as object key"]
+
+with_entries(.value |= . * 10), with_entries(select(.key != "a"))
+{"a":1,"b":2}
+{"a":10,"b":20}
+{"b":2}
+
+[.[] | tostream]
+[{"a":[1,{"b":2}]}, [], {}, 3]
+[[["a",0],1],[["a",1,"b"],2],[["a",1,"b"]],[["a",1]],[["a"]],[[],[]],[[],{}],[[],3]]
+
+fromstream(tostream)
+{"a":[1,{"b":2}],"c":[]}
+{"a":[1,{"b":2}],"c":[]}
+
+[1|truncate_stream([[0],1],[[1,0],2],[[1,0]],[[1]])]
+null
+[[[0],2],[[0]]]
+
+[paths], [paths(type == "number")], [paths(..)]
+{"a":[1,{"b":2}],"c":"x"}
+[["a"],["a",0],["a",1],["a",1,"b"],["c"]]
+[["a",0],["a",1,"b"]]
+[["a"],["a"],["a"],["a"],["a",0],["a",1],["a",1],["a",1,"b"],["c"]]
+
+pick(.a[1].b, .c), pick(.x.y)
+{"a":[1,{"b":2,"x":3}],"c":"x","d":4}
+{"a":[null,{"b":2}],"c":"x"}
+{"x":{"y":null}}
+
+[.[] | try ltrimstr("a") catch .], [.[] | try rtrimstr("a") catch .], [.[] | try trimstr("a") catch .]
+["abca", "x", "a", "", 1, null]
+["bca","x","","","startswith() requires string inputs","startswith() requires string inputs"]
+["abc","x","","","endswith() requires string inputs","endswith() requires string inputs"]
+["bc","x","","","startswith() requires string inputs","startswith() requires string inputs"]
+
+[.[] | try startswith("a") catch .], [.[] | try endswith("a") catch .]
+["abca", 1]
+[true,"startswith() requires string inputs"]
+[true,"endswith() requires string inputs"]
+
+[.[] | try ascii_downcase catch .], [.[] | try ascii_upcase catch .]
+["aBé", 1]
+["abé","explode input must be a string"]
+["ABé","explode input must be a string"]
+
+[.[] | try trim catch .], [.[] | try ltrim catch .], [.[] | try rtrim catch .]
+[" \t a b \n ", "\u3000x\u00a0", "", 1]
+["a b","x","","trim input must be a string"]
+["a b \n ","x ","","trim input must be a string"]
+[" \t a b","　x","","trim input must be a string"]
+
+[.[] | try split(",") catch .]
+["a,b,,c", "", ",", 1]
+[["a","b","","c"],[],["",""],"split input and separator must be strings"]
+
+[.[] | try (split(1)) catch .]
+["a"]
+["split input and separator must be strings"]
+
+abs, (.[] | try abs catch .)
+[-1, 1.5, -0.0, "x", null, [], {}]
+[-1,1.5,-0.0,"x",null,[],{}]
+1
+1.5
+-0.0
+"x"
+"null (null) cannot be negated"
+[]
+{}
+
+[limit(3; .[]), first(.[]), last(.[]), nth(2; .[]), first, last, nth(1)]
+[10,20,30,40]
+[10,20,30,10,40,30,10,40,20]
+
+[limit(0; .[])], [first(empty)], [last(empty)], [nth(9; .[])], [skip(2; .[])], [skip(0; .[])], [skip(9; .[])]
+[10,20,30]
+[]
+[]
+[]
+[]
+[30]
+[10,20,30]
+[]
+
+[try limit(-1; 1) catch ., try skip(-1; 1) catch ., try nth(-1; 1) catch .]
+null
+["limit doesn't support negative count","skip doesn't support negative count","nth doesn't support negative indices"]
+
+[.[] | try nth(-1) catch .]
+[[1,2]]
+[2]
+
+[range(5;0;-2)], [range(0;1;0.25)], [range(-2)], [range(1;3)], [range(0;3;0)]
+null
+[5,3,1]
+[0,0.25,0.5,0.75]
+[]
+[1,2]
+[]
+
+[range(0,1;3,4)], [range(0;10;3,4)]
+null
+[0,1,2,0,1,2,3,1,2,1,2,3]
+[0,3,6,9,0,4,8]
+
+[.[] | try range(.) catch .]
+["x"]
+["Range bounds must be numeric"]
+
+[until(. > 100; . * 3)], [while(. < 50; . * 3)], [limit(4; repeat(. * 2))]
+1
+[243]
+[1,3,9,27]
+[2,2,2,2]
+
+[recurse(if . < 3 then . + 1 else empty end)], [recurse(. * 2; . < 20)], [recurse]
+1
+[1,2,3]
+[1,2,4,8,16]
+[1]
+
+[.. | numbers], [recurse(.[]?)]
+[1,[2,{"a":3}]]
+[1,2,3]
+[[1,[2,{"a":3}]],1,[2,{"a":3}],2,{"a":3},3]
+
+[getpath(paths)]
+{"a":{"b":1}}
+[{"b":1},1]
+
+env | type, ($ENV | type), (builtins | length > 100), (builtins | map(select(startswith("_"))) | length)
+null
+"object"
+"object"
+true
+0
+
+isempty(empty), isempty(1, error("x")), isempty(.[])
+[]
+true
+false
+true
+
+[IN(1, 2)], [.[] | IN(2, 3)], [IN(.[]; 5, 1)]
+[1,2]
+[false]
+[false,true]
+[true]
+
+INDEX(.id), INDEX(.[]; .k)
+[{"id":"a","k":1},{"id":"b","k":2}]
+{"a":{"id":"a","k":1},"b":{"id":"b","k":2}}
+{"1":{"id":"a","k":1},"2":{"id":"b","k":2}}
+
+[JOIN({"a":1,"b":2}; .k)], [JOIN({"a":1}; .[]; .k)], [JOIN({"a":1}; .[]; .k; add)]
+[{"k":"a"},{"k":"b"}]
+[[[{"k":"a"},1],[{"k":"b"},2]]]
+[[{"k":"a"},1],[{"k":"b"},null]]
+
+[any, all], [any(. > 1), all(. > 0)], [any(.[]; . == 2), all(.[]; . < 3)]
+[1,2]
+[true,true]
+[true,true]
+[true,true]
+
+[.[] | [any, all]]
+[[], [true,false], [false,null], [true,true]]
+[[false,true],[true,false],[false,false],[true,true]]
+
+walk(if type == "number" then . + 1 else . end), walk(if type == "object" then del(.x) else . end)
+{"x":1,"y":{"x":2,"z":[3]}}
+{"x":2,"y":{"x":3,"z":[4]}}
+{"y":{"z":[3]}}
+
+[significand, logb, frexp, modf]
+8.5
+[1.0625,3,[0.53125,4],[0.5,8]]
+
+[.[] | [floor, ceil, round, trunc, fabs]]
+[1.5, -1.5, 2.5, 0]
+[[1,2,2,1,1.5],[-2,-1,-2,-1,1.5],[2,3,3,2,2.5],[0,0,0,0,0]]
+
+[.[] | [nearbyint, rint]]
+[0.5, 1.5, 2.5, -0.5]
+[[0,0],[2,2],[2,2],[-0,-0]]
+
+[sqrt, cbrt, exp, exp2, exp10, log, log2, log10, log1p, expm1] | map(if type == "number" then . * 1e12 | round / 1e12 else . end)
+1
+[1,1,2.718281828459,2,10,0,0,0,0.69314718056,1.718281828459]
+
+[sin, cos, tan, asin, acos, atan, sinh, cosh, tanh, asinh, atanh, erf, erfc] | map(if type == "number" then . * 1e12 | round / 1e12 else . end)
+0.5
+[0.479425538604,0.87758256189,0.546302489844,0.523598775598,1.047197551197,0.463647609001,0.521095305494,1.127625965206,0.46211715726,0.48121182506,0.549306144334,0.520499877813,0.479500122187]
+
+[acosh, lgamma, tgamma, lgamma_r] | map(if type == "number" then . * 1e12 | round / 1e12 else . end)
+2
+[1.316957896925,0,1,[0,1]]
+
+[pow(2;10), pow(4;0.5), atan2(1;1), fmin(1;2), fmax(1;2), fmod(7;3), fmod(-7;3), hypot(3;4), copysign(3;-1), drem(10;3), remainder(10;3), fdim(5;3), fdim(3;5), ldexp(3;2), scalb(3;2), scalbln(3;2), fma(2;3;4)] | map(if type == "number" then . * 1e12 | round / 1e12 else . end)
+null
+[1024,2,0.785398163397,1,2,1,-1,5,-3,1,1,2,0,12,12,12,10]
+
+[nextafter(1;2) > 1, nexttoward(1;0) < 1, nextafter(1;1)]
+null
+[true,true,1]
+
+[.[] | try sqrt catch .], [.[] | try floor catch .]
+["x", null]
+["string (\"x\") number required","null (null) number required"]
+["string (\"x\") number required","null (null) number required"]
+
+[log, sqrt] | map(isnan)
+-1
+[true,true]
+
+[frexp, modf], (infinite | [frexp, modf])
+0
+[[0,0],[0,0]]
+[[1.7976931348623157e+308,0],[0,1.7976931348623157e+308]]
+
+[.[] | try pow(.; 2) catch .]
+["x"]
+["string (\"x\") number required"]
+
+[j0, j1, y0, y1, jn(2; .), yn(2; .)] | map(. * 1000000 | round)
+1
+[765198,440051,88257,-781213,114903,-1650683]
+
+[splits(", ")], [splits("a+"; "g")], [splits("x"; null)]
+"a, b, c"
+["a","b","c"]
+["",", b, c"]
+["a, b, c"]
+
+getpath(["a","b"]) |= 5
+null
+{"a":{"b":5}}
+
+[.[]|tojson|fromjson]
+[1.5, -1, 1e100, "x"]
+[1.5,-1,1E+100,"x"]
+
+[.[] | @json, @text]
+[1, "a"]
+["1","1","\"a\"","a"]
+
+[getpath(["a"]), getpath([])]
+{"a":1}
+[1,{"a":1}]
+
+[.[] | try @base64d catch .]
+["", "Zg", "Zm8", "Zm9v", "Zm9vYg==", "4pyT", "a", "Zm9v YmFy", "Zm9v==YmFy"]
+["","f","fo","foo","foob","✓","string (\"a\") trailing base64 byte found","string (\"Zm9v YmFy\") is not valid base64 data","foo"]
+
+[.[] | @base64]
+["", "f", "fo", "foo", "é"]
+["","Zg==","Zm8=","Zm9v","w6k="]
+
+[.[] | @uri], [.[] | try @urid catch .]
+["a b", "é&=?", "%41", "%zz", "%"]
+["a%20b","%C3%A9%26%3D%3F","%2541","%25zz","%25"]
+["a b","é&=?","A","string (\"%zz\") is not a valid uri encoding","string (\"%\") is not a valid uri encoding"]
+
+[.[] | try @csv catch .], [.[] | try @tsv catch .]
+[[1,"a\"b",null,true,false,1.5], ["a\tb\\c\nd\re"], [[1]], [{}], "x"]
+["1,\"a\"\"b\",,true,false,1.5","\"a\tb\\c\nd\re\"","array ([1]) is not valid in a csv row","object ({}) is not valid in a csv row","string (\"x\") cannot be csv-formatted, only array"]
+["1\ta\"b\t\ttrue\tfalse\t1.5","a\\tb\\\\c\\nd\\re","array ([1]) is not valid in a csv row","object ({}) is not valid in a csv row","string (\"x\") cannot be tsv-formatted, only array"]
+
+[.[] | try @sh catch .]
+["it's", [1, "a b", null, true], [[1]], {}]
+["'it'\\''s'","1 'a b' null true","array ([1]) can not be escaped for shell","object ({}) can not be escaped for shell"]
+
+[.[] | @html]
+["<a href=\"x\">'&'</a>", 1, [1]]
+["&lt;a href=&quot;x&quot;&gt;&apos;&amp;&apos;&lt;/a&gt;","1","[1]"]
+
+[try (1 | @nope) catch ., try (1 | format(1)) catch ., (1 | format("text"))]
+null
+["nope is not a valid format","number (1) is not a valid format","1"]
+
+@json "v=\(.)", @html "<\(.)>", @uri "q=\(.)", @sh "echo \(.)", @base64 "\(.)", @text "\(.)", @csv "\([.])", @tsv "\([.])"
+"a b&<"
+"v=\"a b&<\""
+"<a b&amp;&lt;>"
+"q=a%20b%26%3C"
+"echo 'a b&<'"
+"YSBiJjw="
+"a b&<"
+"\"a b&<\""
+"a b&<"
+
+get_search_list
+null
+["~/.jq","$ORIGIN/../lib/jq","$ORIGIN/../lib"]
+
+[try ("x" | modulemeta) catch ., try (1 | modulemeta) catch .]
+null
+["module not found: x","modulemeta input module name must be a string"]
+
+[2, -2, 50, 1e-10] | map(expm1, log1p) | map(if type == "number" then . * 1e12 | round / 1e12 else . end)
+null
+[6.389056098931,1.098612288668,-0.864664716763,null,5184705528587072000000,3.931825632724,1e-10,1e-10]
+
+[.[] | try tonumber catch .]
+["infinity", "Infinity", "-infinity", "nan", "-NaN"]
+[1.7976931348623157e+308,1.7976931348623157e+308,-1.7976931348623157e+308,null,null]
+
+[.[] | try from_entries catch .]
+[[1], ["x"], [[1]]]
+["Cannot index number with string (\"key\")","Cannot index string with string (\"key\")","Cannot index array with string (\"key\")"]
+
+[get_jq_origin | type], [get_prog_origin | type]
+null
+["string"]
+["string"]
+
+[1, 2] | stderr | length
+null
+2
+
+[.[] | debug | . * 2]
+[1, 2]
+[2,4]
+
+[.[] | try ("\(.)" | test("(")) catch .]
+[1]
+["Regex failure: end pattern with unmatched parenthesis"]

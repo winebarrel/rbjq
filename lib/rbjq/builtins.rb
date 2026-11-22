@@ -2,6 +2,7 @@
 
 require 'date'
 require 'time'
+require_relative 'bessel'
 
 module Rbjq
   # Builtin functions implemented in Ruby.
@@ -114,16 +115,50 @@ module Rbjq
       end
     end
 
+    # Same behavior as jq 1.7.1, whose manual tests expect
+    # `[repeat(.*2, error)?]` on 1 to give [2]: the outputs of f applied to
+    # the input are produced over and over.
     special('repeat', 1) do |interp, input, path, args, env, &blk|
-      f = args[0]
-      stack = [[input, path]]
-      until stack.empty?
-        v, p = stack.pop
-        blk.call(v, p)
-        children = []
-        interp.eval_node(f, v, p, env) { |cv, cp| children << [cv, cp] }
-        children.reverse_each { |c| stack.push(c) }
+      loop { interp.eval_node(args[0], input, path, env, &blk) }
+    end
+
+    special('nth', 2) do |interp, input, path, args, env, &blk|
+      interp.eval_node(args[0], input, nil, env) do |n|
+        num(n)
+        err("nth doesn't support negative indices") if n.negative?
+
+        count = 0
+        tag = Object.new
+        catch(tag) do
+          interp.eval_node(args[1], input, path, env) do |v, p|
+            if count >= n
+              blk.call(v, p)
+              throw tag
+            end
+            count += 1
+          end
+        end
       end
+    end
+
+    fn('bsearch', 1) do |v, target|
+      err("#{Value.desc(v)} cannot be searched from") unless v.is_a?(Array)
+      lo = 0
+      hi = v.length - 1
+      found = nil
+      while lo <= hi
+        mid = (lo + hi) / 2
+        c = Value.compare(v[mid], target)
+        if c.zero?
+          found = mid
+          break
+        elsif c.negative?
+          lo = mid + 1
+        else
+          hi = mid - 1
+        end
+      end
+      found || -1 - lo
     end
 
     special('while', 2) do |interp, input, path, args, env, &blk|
@@ -180,7 +215,7 @@ module Rbjq
     special('range', 1) do |interp, input, path, args, env, &blk|
       inv = path && INVALID
       interp.eval_node(args[0], input, nil, env) do |n|
-        num(n)
+        err('Range bounds must be numeric') unless Value.number?(n)
         i = 0
         while i < n
           blk.call(i, inv)
@@ -240,9 +275,28 @@ module Rbjq
             end
           end
         elsif n.negative?
-          interp.eval_node(args[1], input, path, env, &blk)
+          err("limit doesn't support negative count")
         end
       end
+    end
+
+    special('skip', 2) do |interp, input, path, args, env, &blk|
+      interp.eval_node(args[0], input, nil, env) do |n|
+        num(n)
+        err("skip doesn't support negative count") if n.negative?
+
+        count = 0
+        interp.eval_node(args[1], input, path, env) do |v, p|
+          blk.call(v, p) if count >= n
+          count += 1
+        end
+      end
+    end
+
+    special('last', 1) do |interp, input, path, args, env, &blk|
+      got = nil
+      interp.eval_node(args[0], input, nil, env) { |v| got = [v] }
+      blk.call(got[0], path && INVALID) if got
     end
 
     special('first', 1) do |interp, input, path, args, env, &blk|
@@ -312,23 +366,27 @@ module Rbjq
 
     fn('now', 0) { |_| Time.now.to_f }
 
-    special('ltrimstr', 1) do |interp, input, path, args, env, &blk|
-      interp.each_args(args, input, env) do |(pre)|
-        r = input.is_a?(String) && pre.is_a?(String) && input.start_with?(pre) ? input[pre.length..] : input
-        blk.call(r, path && INVALID)
-      end
+    special('get_jq_origin', 0) do |interp, _input, path, _args, _env, &blk|
+      blk.call(interp.options.fetch(:jq_origin) { File.expand_path('../../exe', __dir__) }, path && INVALID)
     end
 
-    special('rtrimstr', 1) do |interp, input, path, args, env, &blk|
-      interp.each_args(args, input, env) do |(suf)|
-        r = if input.is_a?(String) && suf.is_a?(String) && input.end_with?(suf) && !suf.empty?
-              input[0, input.length - suf.length]
-            else
-              input
-            end
-        blk.call(r, path && INVALID)
-      end
+    special('get_prog_origin', 0) do |interp, _input, path, _args, _env, &blk|
+      blk.call(interp.options.fetch(:prog_origin) { Dir.pwd }, path && INVALID)
     end
+
+    def ltrimstr(v, pre)
+      err('startswith() requires string inputs') unless v.is_a?(String) && pre.is_a?(String)
+      v.start_with?(pre) ? v[pre.length..] : v
+    end
+
+    def rtrimstr(v, suf)
+      err('endswith() requires string inputs') unless v.is_a?(String) && suf.is_a?(String)
+      v.end_with?(suf) ? v[0, v.length - suf.length] : v
+    end
+
+    fn('ltrimstr', 1) { |v, pre| ltrimstr(v, pre) }
+    fn('rtrimstr', 1) { |v, suf| rtrimstr(v, suf) }
+    fn('trimstr', 1) { |v, x| rtrimstr(ltrimstr(v, x), x) }
 
     # ---------------------------------------------------------- types etc
 
@@ -384,11 +442,15 @@ module Rbjq
       contains?(a, b)
     end
 
-    def contains?(a, b)
+    def contains?(a, b, depth = 0)
+      if (a.is_a?(Hash) || a.is_a?(Array)) && depth > Value::MAX_DEPTH
+        err('Containment check too deep')
+      end
+
       if a.is_a?(Hash) && b.is_a?(Hash)
-        b.all? { |k, bv| a.key?(k) && contains?(a[k], bv) }
+        b.all? { |k, bv| a.key?(k) && contains?(a[k], bv, depth + 1) }
       elsif a.is_a?(Array) && b.is_a?(Array)
-        b.all? { |bv| a.any? { |av| contains?(av, bv) } }
+        b.all? { |bv| a.any? { |av| contains?(av, bv, depth + 1) } }
       elsif a.is_a?(String) && b.is_a?(String)
         a.include?(b)
       elsif Value.kind_order(a) == Value.kind_order(b)
@@ -402,7 +464,6 @@ module Rbjq
       vals = case v
              when Array then v
              when Hash then v.values
-             when nil then []
              else err("Cannot iterate over #{Value.desc(v)}")
              end
       vals.reduce(nil) { |acc, x| Ops.add(acc, x) }
@@ -422,49 +483,53 @@ module Rbjq
       end
     end
 
+    TONUMBER_RE = /\A[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?\z/
+
     fn('tonumber', 0) do |v|
+      next v if Value.number?(v)
+
+      err("#{Value.desc(v)} cannot be parsed as a number") unless v.is_a?(String)
       case v
-      when Integer, Float then v
-      when String
-        s = v.strip
-        if s == 'nan' || s == 'NaN'
-          Float::NAN
-        elsif s.match?(/\A-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?\z/) ||
-              s.match?(/\A-?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?\z/)
-          if s.match?(/[.eE]/)
-            f = Float(s.sub(/\A(-?)\./, '\10.').sub(/\.(?![0-9])/, '.0'))
-            f = f.positive? ? Float::MAX : -Float::MAX if f.infinite?
-            Value.normalize_number(f)
-          else
-            Integer(s, 10)
-          end
-        else
-          err("Cannot parse '#{v}' as JSON")
-        end
+      when 'nan', 'NaN', '-nan', '-NaN' then Float::NAN
+      when 'infinity', 'Infinity' then Float::MAX
+      when '-infinity', '-Infinity' then -Float::MAX
       else
-        err("#{Value.desc(v)} cannot be parsed as a number")
+        err("#{Value.desc(v)} cannot be parsed as a number") unless v.match?(TONUMBER_RE)
+        JSONParser.new(v).send(:parse_number, v)
+      end
+    end
+
+    fn('toboolean', 0) do |v|
+      case v
+      when true, false then v
+      when 'true' then true
+      when 'false' then false
+      else err("#{Value.desc(v)} cannot be parsed as a boolean")
       end
     end
 
     fn('ascii_downcase', 0) do |v|
-      err("#{Value.desc(v)} cannot be lowercased") unless v.is_a?(String)
+      err('explode input must be a string') unless v.is_a?(String)
       v.tr('A-Z', 'a-z')
     end
 
     fn('ascii_upcase', 0) do |v|
-      err("#{Value.desc(v)} cannot be uppercased") unless v.is_a?(String)
+      err('explode input must be a string') unless v.is_a?(String)
       v.tr('a-z', 'A-Z')
     end
 
     fn('explode', 0) do |v|
-      err("#{Value.desc(v)} cannot be exploded, as it is not a string") unless v.is_a?(String)
+      err('explode input must be a string') unless v.is_a?(String)
       v.codepoints
     end
 
     fn('implode', 0) do |v|
-      err("#{Value.desc(v)} cannot be imploded, as it is not an array") unless v.is_a?(Array)
+      err('implode input must be an array') unless v.is_a?(Array)
       v.map do |cp|
-        err("Unicode codepoint must be numeric") unless Value.number?(cp)
+        unless Value.number?(cp) && !(cp.is_a?(Float) && cp.nan?)
+          err("#{Value.desc(cp)} can't be imploded, unicode codepoint needs to be numeric")
+        end
+
         cp = cp.to_i
         cp = 0xFFFD if cp.negative? || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)
         cp.chr(Encoding::UTF_8)
@@ -481,23 +546,18 @@ module Rbjq
       v.end_with?(s)
     end
 
-    WS_L = /\A[ \t\n\r\f\v]+/
-    WS_R = /[ \t\n\r\f\v]+\z/
+    WS_CHARS = "\t\n\v\f\r \u0085   -     　"
+    WS_L = /\A[#{WS_CHARS}]+/
+    WS_R = /[#{WS_CHARS}]+\z/
 
-    fn('trim', 0) do |v|
-      err("#{Value.desc(v)} cannot be trimmed") unless v.is_a?(String)
-      v.sub(WS_L, '').sub(WS_R, '')
+    def trim_input(v)
+      err('trim input must be a string') unless v.is_a?(String)
+      v
     end
 
-    fn('ltrim', 0) do |v|
-      err("#{Value.desc(v)} cannot be trimmed") unless v.is_a?(String)
-      v.sub(WS_L, '')
-    end
-
-    fn('rtrim', 0) do |v|
-      err("#{Value.desc(v)} cannot be trimmed") unless v.is_a?(String)
-      v.sub(WS_R, '')
-    end
+    fn('trim', 0) { |v| trim_input(v).sub(WS_L, '').sub(WS_R, '') }
+    fn('ltrim', 0) { |v| trim_input(v).sub(WS_L, '') }
+    fn('rtrim', 0) { |v| trim_input(v).sub(WS_R, '') }
 
     fn('split', 1) do |v, sep|
       err('split input and separator must be strings') unless v.is_a?(String) && sep.is_a?(String)
@@ -515,8 +575,8 @@ module Rbjq
         acc = acc.nil? ? '' : Ops.add(acc, sep)
         s = case x
             when nil then ''
-            when String then x
-            else Encoder.dump(x)
+            when true, false, Integer, Float then Encoder.dump(x)
+            else x # arrays and objects make the addition fail, like jq
             end
         acc = Ops.add(acc, s)
       end
@@ -533,15 +593,19 @@ module Rbjq
       end
     end
 
-    fn('flatten', 0) do |v|
-      err("Cannot iterate over #{Value.desc(v)}") unless v.is_a?(Array)
-      flatten(v, -1)
+    def flatten_input(v)
+      case v
+      when Array then v
+      when Hash then v.values
+      else err("Cannot iterate over #{Value.desc(v)}")
+      end
     end
+
+    fn('flatten', 0) { |v| flatten(flatten_input(v), -1) }
 
     fn('flatten', 1) do |v, d|
       err('flatten depth must not be negative') if Value.number?(d) && d.negative?
-      err("Cannot iterate over #{Value.desc(v)}") unless v.is_a?(Array)
-      flatten(v, d.to_i)
+      flatten(flatten_input(v), d.to_i)
     end
 
     def require_array(v, what)
@@ -592,7 +656,7 @@ module Rbjq
     end
 
     fn('_min_by_impl', 1) do |v, keys|
-      require_array(v, 'iterated over')
+      not_iterable(v, keys) unless v.is_a?(Array)
       best = nil
       bk = nil
       v.each_with_index do |x, i|
@@ -605,7 +669,7 @@ module Rbjq
     end
 
     fn('_max_by_impl', 1) do |v, keys|
-      require_array(v, 'iterated over')
+      not_iterable(v, keys) unless v.is_a?(Array)
       best = nil
       bk = nil
       v.each_with_index do |x, i|
@@ -617,13 +681,17 @@ module Rbjq
       best
     end
 
+    def not_iterable(v, keys = v)
+      err("#{Value.desc(v)} and #{Value.desc(keys)} cannot be iterated over")
+    end
+
     fn('min', 0) do |v|
-      require_array(v, 'iterated over')
+      not_iterable(v) unless v.is_a?(Array)
       v.each_with_index.reduce(nil) { |m, (x, i)| i.zero? || Value.compare(x, m).negative? ? x : m }
     end
 
     fn('max', 0) do |v|
-      require_array(v, 'iterated over')
+      not_iterable(v) unless v.is_a?(Array)
       v.each_with_index.reduce(nil) { |m, (x, i)| i.zero? || Value.compare(x, m) >= 0 ? x : m }
     end
 
@@ -634,24 +702,34 @@ module Rbjq
       out
     end
 
+    # codepoint offsets of every (possibly overlapping) occurrence
+    def strindices(v, i)
+      out = []
+      return out if i.empty?
+
+      pos = 0
+      while (idx = v.index(i, pos))
+        out << idx
+        pos = idx + 1
+      end
+      out
+    end
+
+    fn('_strindices', 1) do |v, i|
+      err("#{Value.desc(v)} cannot be searched, as it is not a string") unless v.is_a?(String)
+      err("#{Value.desc(i)} is not a string") unless i.is_a?(String)
+      strindices(v, i)
+    end
+
+    # def indices($i): if type == "array" and ($i|type) == "array" then .[$i]
+    #   elif type == "array" then .[[$i]]
+    #   elif type == "string" and ($i|type) == "string" then _strindices($i)
+    #   else .[$i] end;
     fn('indices', 1) do |v, i|
-      case v
-      when nil then nil
-      when String
-        err("Cannot determine indices of #{Value.desc(i)} in a string") unless i.is_a?(String)
-        if i.empty?
-          nil
-        else
-          out = []
-          pos = 0
-          while (idx = v.index(i, pos))
-            out << idx
-            pos = idx + 1
-          end
-          out
-        end
-      when Array
-        i.is_a?(Array) ? Ops.indices_of(v, i) : Ops.indices_of(v, [i])
+      if v.is_a?(Array)
+        Ops.index(v, i.is_a?(Array) ? i : [i])
+      elsif v.is_a?(String) && i.is_a?(String)
+        strindices(v, i)
       else
         Ops.index(v, i)
       end
@@ -672,25 +750,14 @@ module Rbjq
              else err("Cannot iterate over #{Value.desc(v)}")
              end
       vals.each_with_object({}) do |e, h|
-        k = nil
-        val = nil
-        if e.is_a?(Hash)
-          k = e['key']
-          if k.nil? || k == false && !e.key?('key')
-            k = %w[k name Name K Key].map { |n| e[n] }.find { |x| Value.truthy?(x) }
-          end
-          val = e.key?('value') ? e['value'] : e['v']
-        elsif e.nil?
-          k = nil
-        else
-          Ops.index(e, 'key')
-        end
-        k = case k
-            when String then k
-            when Integer, Float, true, false then Encoder.dump(k)
-            else err("Cannot use #{Value.desc(k)} as object key")
-            end
-        h[k] = val
+        k = %w[key Key name Name].reduce(nil) { |acc, n| Value.truthy?(acc) ? acc : Ops.index(e, n) }
+        err("Cannot use #{Value.desc(k)} as object key") unless k.is_a?(String)
+        has_value = case e
+                    when Hash then e.key?('value')
+                    when nil then false
+                    else err("Cannot check whether #{Value.type_name(e)} has a string key")
+                    end
+        h[k] = has_value ? e['value'] : Ops.index(e, 'Value')
       end
     end
 
@@ -701,20 +768,15 @@ module Rbjq
 
     fn('infinite', 0) { |_| Float::INFINITY }
     fn('nan', 0) { |_| Float::NAN }
-    fn('isinfinite', 0) { |v| num(v).is_a?(Float) && v.infinite? ? true : false }
-    fn('isnan', 0) { |v| num(v).is_a?(Float) && v.nan? }
+    fn('isinfinite', 0) { |v| v.is_a?(Float) && v.infinite? ? true : false }
+    fn('isnan', 0) { |v| v.is_a?(Float) && v.nan? }
     fn('isnormal', 0) do |v|
-      num(v)
+      next false unless Value.number?(v)
+
       f = v.to_f
       f.finite? && !f.zero? && f.abs >= Float::MIN
     end
 
-    fn('abs', 0) do |v|
-      err("#{Value.desc(v)} has no absolute value") unless Value.number?(v)
-      v.negative? ? Value.normalize_number(-v) : v
-    end
-
-    fn('toarray', 0) { |v| v.is_a?(Array) ? v : [v] }
     fn('have_literal_numbers', 0) { |_| true }
     fn('have_decnum', 0) { |_| false }
 
@@ -730,6 +792,45 @@ module Rbjq
       Float::NAN
     end
 
+    # Kahan's accurate expm1 / log1p
+    def expm1(x)
+      # |x| <= 1: sum the series exactly so that the result is correctly rounded
+      if x.finite? && x.abs <= 1
+        return x if x.zero?
+
+        r = Rational(x)
+        term = r
+        sum = r
+        k = 1
+        while term.abs > sum.abs * Rational(1, 10**25)
+          k += 1
+          term = term * r / k
+          sum += term
+        end
+        return sum.to_f
+      end
+
+      u = Math.exp(x)
+      return x if u == 1.0
+      return -1.0 if u - 1.0 == -1.0
+      return u if u.infinite?
+
+      (u - 1.0) * x / Math.log(u)
+    end
+
+    def log1p(x)
+      u = 1.0 + x
+      return x if u == 1.0
+      return Math.log(u) if u.infinite? || u <= 0
+
+      Math.log(u) * x / (u - 1.0)
+    end
+
+    # C rounding functions keep the sign of zero: ceil(-0.5) is -0
+    def signed(x, r)
+      r.zero? && (x.negative? || (x.zero? && (1.0 / x).negative?)) ? -0.0 : r
+    end
+
     def round_half_even(f)
       return f unless f.finite?
 
@@ -738,23 +839,28 @@ module Rbjq
 
     MATH1 = {
       'floor' => ->(x) { x.is_a?(Integer) ? x : (x.finite? ? x.floor.to_f : x) },
-      'ceil' => ->(x) { x.is_a?(Integer) ? x : (x.finite? ? x.ceil.to_f : x) },
-      'round' => ->(x) { x.is_a?(Integer) ? x : (x.finite? ? x.round.to_f : x) },
-      'trunc' => ->(x) { x.is_a?(Integer) ? x : (x.finite? ? x.truncate.to_f : x) },
-      'nearbyint' => ->(x) { x.is_a?(Integer) ? x : Builtins.round_half_even(x) },
-      'rint' => ->(x) { x.is_a?(Integer) ? x : Builtins.round_half_even(x) },
+      'ceil' => ->(x) { x.is_a?(Integer) ? x : Builtins.signed(x, x.finite? ? x.ceil.to_f : x) },
+      'round' => ->(x) { x.is_a?(Integer) ? x : Builtins.signed(x, x.finite? ? x.round.to_f : x) },
+      'trunc' => ->(x) { x.is_a?(Integer) ? x : Builtins.signed(x, x.finite? ? x.truncate.to_f : x) },
+      'nearbyint' => ->(x) { x.is_a?(Integer) ? x : Builtins.signed(x, Builtins.round_half_even(x)) },
+      'rint' => ->(x) { x.is_a?(Integer) ? x : Builtins.signed(x, Builtins.round_half_even(x)) },
       'fabs' => ->(x) { x.abs },
       'sqrt' => ->(x) { Math.sqrt(x) },
       'cbrt' => ->(x) { Math.cbrt(x) },
       'exp' => ->(x) { Math.exp(x) },
       'exp2' => ->(x) { 2.0**x },
       'exp10' => ->(x) { 10.0**x },
-      'pow10' => ->(x) { 10.0**x },
-      'expm1' => ->(x) { x.abs < 1e-5 ? x + x * x / 2.0 + x * x * x / 6.0 : Math.exp(x) - 1 },
+      'erf' => ->(x) { Math.erf(x) },
+      'erfc' => ->(x) { Math.erfc(x) },
+      'j0' => ->(x) { Bessel.jn(0, x) },
+      'j1' => ->(x) { Bessel.jn(1, x) },
+      'y0' => ->(x) { Bessel.y0(x) },
+      'y1' => ->(x) { Bessel.y1(x) },
+      'expm1' => ->(x) { Builtins.expm1(x.to_f) },
       'log' => ->(x) { x.zero? ? -Float::INFINITY : Math.log(x) },
       'log2' => ->(x) { x.zero? ? -Float::INFINITY : Math.log2(x) },
       'log10' => ->(x) { x.zero? ? -Float::INFINITY : Math.log10(x) },
-      'log1p' => ->(x) { x.abs < 1e-5 ? x - x * x / 2.0 + x * x * x / 3.0 : Math.log(1 + x) },
+      'log1p' => ->(x) { Builtins.log1p(x.to_f) },
       'logb' => ->(x) { x.zero? ? -Float::INFINITY : (x.to_f.finite? ? Math.frexp(x)[1] - 1 : x.abs.to_f) },
       'significand' => ->(x) { x.zero? || !x.to_f.finite? ? x : Math.frexp(x)[0] * 2 },
       'gamma' => ->(x) { Math.lgamma(x)[0] },
@@ -814,6 +920,7 @@ module Rbjq
       'hypot' => ->(a, b) { Math.hypot(a, b) },
       'copysign' => ->(a, b) { (b.to_f.negative? || (b.to_f.zero? && (1.0 / b.to_f).negative?)) ? -a.to_f.abs : a.to_f.abs },
       'drem' => ->(a, b) { b.zero? ? Float::NAN : a - b * Builtins.round_half_even(a.to_f / b) },
+      'remainder' => ->(a, b) { b.zero? ? Float::NAN : a - b * Builtins.round_half_even(a.to_f / b) },
       'fdim' => ->(a, b) { a > b ? a - b : 0 },
       'ldexp' => ->(a, b) { Math.ldexp(a, b.to_i) },
       'scalb' => ->(a, b) { a * (2.0**b) },
@@ -827,6 +934,8 @@ module Rbjq
     end
 
     fn('fma', 3) { |_v, a, b, c| mathcall { num(a) * num(b) + num(c) } }
+    fn('jn', 2) { |_v, n, x| mathcall { Bessel.jn(num(n), num(x)) } }
+    fn('yn', 2) { |_v, n, x| mathcall { Bessel.yn(num(n), num(x)) } }
 
     # ------------------------------------------------------------- regex
 
@@ -836,7 +945,7 @@ module Rbjq
       out = +''
       i = 0
       in_class = false
-      has_named = re.match?(/\(\?<[a-zA-Z_]/) || re.match?(/\(\?P<[a-zA-Z_]/)
+      has_named = re.match?(/\(\?<[a-zA-Z_]/)
       gen = 0
       while i < re.length
         c = re[i]
@@ -856,7 +965,7 @@ module Rbjq
             i += 1
           end
           if re[i + 1] == ']'
-            out << ']'
+            out << '\]' # a leading ] belongs to the class
             i += 1
           end
         elsif c == '^'
@@ -866,9 +975,6 @@ module Rbjq
         elsif c == '(' && has_named && re[i + 1] != '?'
           gen += 1
           out << "(?<__rbjq_#{gen}>"
-        elsif c == '(' && re[i + 1, 3] == '?P<'
-          out << '(?<'
-          i += 3
         else
           out << c
         end
@@ -878,7 +984,7 @@ module Rbjq
     end
 
     def compile_regex(re, flags)
-      err("#{Value.desc(re)} cannot be matched, as it is not a string") unless re.is_a?(String)
+      err("#{Value.desc(re)} is not a string") unless re.is_a?(String)
       unless flags.nil? || flags.is_a?(String)
         err("#{Value.desc(flags)} is not a string")
       end
@@ -905,7 +1011,7 @@ module Rbjq
       begin
         regexp = Regexp.new(translate_regex(re), opts)
       rescue RegexpError => e
-        err("#{re} (at offset 0) is not a valid regex: #{e.message}")
+        err("Regex failure: #{e.message.sub(/: \/.*\z/m, '')}")
       end
       names = {}
       regexp.named_captures.each do |name, idxs|
@@ -950,8 +1056,8 @@ module Rbjq
     fn('_match_impl', 3) do |v, re, flags, test|
       if test
         err("#{Value.desc(v)} cannot be matched, as it is not a string") unless v.is_a?(String)
-        regexp, = compile_regex(re, flags)
-        regexp.match?(v)
+        regexp, _, noempty, = compile_regex(re, flags)
+        noempty ? !match_all(v, re, flags)[0].empty? : regexp.match?(v)
       else
         ms, names = match_all(v, re, flags)
         ms.map { |m| match_object(m, names) }
@@ -973,18 +1079,23 @@ module Rbjq
         blk.call(input, path && INVALID)
         return
       end
-      gen = lambda do |i, acc, prev|
-        if i == ms.size
-          blk.call(acc + input[prev..], path && INVALID)
-          return
+      # Like jq 1.7.1: the n-th output of the replacement is used for every
+      # match, giving one result per output.
+      results = []
+      prev = 0
+      ms.each do |m|
+        gap = input[prev...m.begin(0)]
+        inserts = []
+        interp.eval_node(str_node, capture_object(m, names), nil, env) { |s| inserts << s }
+        inserts.each_with_index do |ins, ix|
+          results[ix] = Ops.add(Ops.add(results[ix], gap), ins)
         end
-        m = ms[i]
-        interp.eval_node(str_node, capture_object(m, names), nil, env) do |s|
-          err("#{Value.desc(acc)} and #{Value.desc(s)} cannot be added") unless s.is_a?(String)
-          gen.call(i + 1, acc + input[prev...m.begin(0)] + s, m.end(0))
-        end
+        prev = m.end(0)
       end
-      gen.call(0, +'', 0)
+      rest = input[prev..]
+      results = results.map { |res| Ops.add(res, rest) }.select { |res| Value.truthy?(res) }
+      results = [input] if results.empty?
+      results.each { |res| blk.call(res, path && INVALID) }
     end
 
     special('sub', 2) do |interp, input, path, args, env, &blk|
@@ -1051,75 +1162,166 @@ module Rbjq
       era * 146_097 + doe - 719_468
     end
 
+    # [year, month, mday, hours, minutes, seconds, ...] with missing fields as 0
+    def tm_fields(bd, name)
+      err("#{name} requires parsed datetime inputs") unless bd.all? { |x| Value.number?(x) }
+      f = bd[0, 6].map(&:floor)
+      f[0] ||= 1900
+      f.fill(0, f.length...6)
+    end
+
     def timegm(bd)
-      unless bd.is_a?(Array) && bd.length >= 6 && bd[0, 6].all? { |x| Value.number?(x) }
-        err('mktime requires array of 6 numbers')
-      end
-      y, mon, d, h, mi, s = bd[0, 6].map { |x| x.floor }
+      y, mon, d, h, mi, s = tm_fields(bd, 'mktime')
       y += mon.div(12)
       mon %= 12
       days = days_from_civil(y, mon + 1, 1) + (d - 1)
       days * 86_400 + h * 3600 + mi * 60 + s
     end
 
-    def time_from_broken_down(bd, local: false)
-      err('strftime/1 requires parsed datetime inputs') unless bd.is_a?(Array) && bd.length >= 6 && bd[0, 6].all? { |x| Value.number?(x) }
-      secs = timegm(bd)
-      if local
-        y, mon, d, h, mi, s = bd[0, 6].map(&:floor)
-        Time.local(y, mon + 1, d, h, mi, s)
-      else
-        Time.at(secs).utc
-      end
+    # jq's set_tm_wday / set_tm_yday, which also handle a day of month of 0
+    def tm_wday(year, mon, mday)
+      century = year / 100
+      y = year % 100
+      y -= 1 if mon < 2
+      m = mon - 1
+      m += 12 if m < 1
+      wday = (mday + (2.6 * m - 0.2).floor + y + (y / 4.0).floor + (century / 4.0).floor - 2 * century).remainder(7)
+      wday.negative? ? wday + 7 : wday
+    end
+
+    CUMULATIVE_DAYS = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334].freeze
+
+    def tm_yday(year, mon, mday)
+      leap = mon > 1 && ((year % 4).zero? && (year % 100 != 0) || (year % 400).zero?) ? 1 : 0
+      CUMULATIVE_DAYS[mon.abs % 12] + leap + mday - 1
     end
 
     fn('gmtime', 0) do |v|
-      err('gmtime() requires a number') unless Value.number?(v)
+      err('gmtime() requires numeric inputs') unless Value.number?(v)
       t, frac = time_from_number(v)
       broken_down(t, frac)
     end
 
     fn('localtime', 0) do |v|
-      err('localtime() requires a number') unless Value.number?(v)
+      err('localtime() requires numeric inputs') unless Value.number?(v)
       t, frac = time_from_number(v, local: true)
       broken_down(t, frac)
     end
 
     fn('mktime', 0) do |v|
-      err('mktime requires array of 6 numbers') unless v.is_a?(Array)
-      timegm(v)
+      err('mktime requires array inputs') unless v.is_a?(Array)
+      secs = timegm(v)
+      err('invalid gmtime representation') if secs < MIN_TIME
+
+      secs
+    end
+
+    DAY_NAMES = %w[Sunday Monday Tuesday Wednesday Thursday Friday Saturday].freeze
+    MONTH_NAMES = %w[January February March April May June July August September October November December].freeze
+
+    # The broken-down time [year, month, mday, hours, minutes, seconds, wday, yday]
+    # that jq hands to strftime(3): fields are used as given (not normalized);
+    # missing ones are 0 (the year is 1900).
+    def strftime_fields(v, name, local)
+      if Value.number?(v)
+        return broken_down(time_from_number(v, local: local)[0]).map { |x| x.floor }
+      end
+
+      err("#{name} requires parsed datetime inputs") unless v.is_a?(Array)
+      err("#{name} requires parsed datetime inputs") unless v.all? { |x| Value.number?(x) }
+
+      f = v[0, 8].map(&:floor)
+      f[0] ||= 1900
+      f.fill(0, f.length...8)
+      # jq normalizes the fields with timegm(3), which fails before 1900;
+      # then the fields are formatted as given
+      secs = timegm(f)
+      return f if secs < MIN_TIME
+
+      t = Time.at(secs)
+      t = local ? Time.local(t.utc.year, t.utc.month, t.utc.day, t.utc.hour, t.utc.min, t.utc.sec) : t.utc
+      broken_down(t).map { |x| x.floor }
+    end
+
+    MIN_TIME = -2_208_988_800 # 1900-01-01T00:00:00Z
+
+    # strftime(3) in the C locale over raw fields. Directives that need a
+    # normalized date (week numbers etc.) are delegated to Time#strftime.
+    def format_time(fields, fmt, local)
+      year, mon, mday, hour, min, sec, wday, yday = fields
+      normalized = lambda do
+        t = Time.at(timegm(fields)).utc
+        local ? Time.local(t.year, t.month, t.day, t.hour, t.min, t.sec) : t
+      end
+      day = DAY_NAMES[wday % 7]
+      month = MONTH_NAMES[mon % 12]
+      fmt.gsub(/%([-_0^#]?)([a-zA-Z%+])/) do
+        flag = Regexp.last_match(1)
+        c = Regexp.last_match(2)
+        next normalized.call.strftime("%#{flag}#{c}") unless flag.empty?
+
+        case c
+        when 'Y' then year.to_s
+        when 'C' then format('%02d', year / 100)
+        when 'y' then format('%02d', year % 100)
+        when 'm' then format('%02d', mon + 1)
+        when 'd' then format('%02d', mday)
+        when 'e' then format('%2d', mday)
+        when 'H' then format('%02d', hour)
+        when 'k' then format('%2d', hour)
+        when 'I' then format('%02d', (hour % 12).zero? ? 12 : hour % 12)
+        when 'l' then format('%2d', (hour % 12).zero? ? 12 : hour % 12)
+        when 'M' then format('%02d', min)
+        when 'S' then format('%02d', sec)
+        when 'p' then hour < 12 ? 'AM' : 'PM'
+        when 'j' then format('%03d', yday + 1)
+        when 'a' then day[0, 3]
+        when 'A' then day
+        when 'b', 'h' then month[0, 3]
+        when 'B' then month
+        when 'u' then (wday % 7).zero? ? '7' : (wday % 7).to_s
+        when 'w' then (wday % 7).to_s
+        when 'n' then "\n"
+        when 't' then "\t"
+        when '%' then '%'
+        when 'D' then format_time(fields, '%m/%d/%y', local)
+        when 'F' then format_time(fields, '%Y-%m-%d', local)
+        when 'T' then format_time(fields, '%H:%M:%S', local)
+        when 'R' then format_time(fields, '%H:%M', local)
+        when 'r' then format_time(fields, '%I:%M:%S %p', local)
+        when 'c' then format_time(fields, '%a %b %e %H:%M:%S %Y', local)
+        when 'x' then format_time(fields, '%m/%d/%y', local)
+        when 'X' then format_time(fields, '%H:%M:%S', local)
+        when 's' then (local ? normalized.call.to_i : timegm(fields)).to_s
+        when 'Z' then local ? normalized.call.strftime('%Z') : 'UTC'
+        when 'z' then local ? normalized.call.strftime('%z') : '+0000'
+        else normalized.call.strftime("%#{c}")
+        end
+      end
     end
 
     fn('strftime', 1) do |v, fmt|
       err('strftime/1 requires a string format') unless fmt.is_a?(String)
-      t = if Value.number?(v)
-            time_from_number(v)[0]
-          else
-            time_from_broken_down(v)
-          end
-      t.strftime(fmt)
+      format_time(strftime_fields(v, 'strftime/1', false), fmt, false)
     end
 
     fn('strflocaltime', 1) do |v, fmt|
       err('strflocaltime/1 requires a string format') unless fmt.is_a?(String)
-      t = if Value.number?(v)
-            time_from_number(v, local: true)[0]
-          else
-            time_from_broken_down(v, local: true)
-          end
-      t.strftime(fmt)
+      format_time(strftime_fields(v, 'strflocaltime/1', true), fmt, true)
     end
 
     fn('strptime', 1) do |v, fmt|
       err("strptime/1 requires string inputs and arguments") unless v.is_a?(String) && fmt.is_a?(String)
       h = Date._strptime(v, fmt)
       err("date \"#{v}\" does not match format \"#{fmt}\"") if h.nil? || h.key?(:leftover)
-      t = if h[:seconds]
-            Time.at(h[:seconds]).utc
-          else
-            Time.utc(h[:year] || 1900, h[:mon] || 1, h[:mday] || 1, h[:hour] || 0, h[:min] || 0, h[:sec] || 0)
-          end
-      broken_down(t)
+      next broken_down(Time.at(h[:seconds]).utc) if h[:seconds]
+
+      # like strptime(3): fields that are not parsed stay 0 (the year is 1900)
+      year = h[:year] || 1900
+      mon = (h[:mon] || 1) - 1
+      mday = h[:mday] || 0
+      [year, mon, mday, h[:hour] || 0, h[:min] || 0, h[:sec] || 0,
+       tm_wday(year, mon, mday), tm_yday(year, mon, mday)]
     end
   end
 end

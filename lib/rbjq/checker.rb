@@ -17,7 +17,7 @@ module Rbjq
       end
     end
 
-    GLOBAL_VARS = %w[ENV __prog_args __loc__].freeze
+    GLOBAL_VARS = %w[ENV __loc__].freeze
 
     def initialize(known_funcs)
       @known = known_funcs
@@ -61,6 +61,10 @@ module Rbjq
         raise CompileError, "$#{node[1]} is not defined" unless s.vars.include?(node[1])
       when :object
         node[1].each do |k, v|
+          if k[0] == :literal && !k[1].is_a?(String)
+            raise CompileError, "Cannot use #{Value.desc(k[1])} as object key"
+          end
+
           walk(k, s)
           walk(v, s)
         end
@@ -124,6 +128,10 @@ module Rbjq
         p[1].each { |e| collect_pattern(e, s, names) }
       when :pobject
         p[1].each do |key, var, sub|
+          if key[0] == :literal && !key[1].is_a?(String)
+            raise CompileError, "Cannot use #{Value.desc(key[1])} as object key"
+          end
+
           names << var if var
           walk(key, s.with_vars(names))
           collect_pattern(sub, s, names) if sub

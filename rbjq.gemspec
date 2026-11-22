@@ -19,7 +19,7 @@ Gem::Specification.new do |spec|
   spec.metadata['source_code_uri'] = spec.homepage
   spec.metadata['rubygems_mfa_required'] = 'true'
 
-  spec.files = Dir['lib/**/*.rb', 'exe/*', 'README.md', 'LICENSE']
+  spec.files = Dir['lib/**/*.rb', 'exe/*', 'README.md', 'LICENSE', 'LICENSE-jq']
   spec.bindir = 'exe'
   spec.executables = ['rbjq']
   spec.require_paths = ['lib']

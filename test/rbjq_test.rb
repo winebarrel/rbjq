@@ -33,7 +33,7 @@ class RbjqTest < Minitest::Test
     e = assert_raises(Rbjq::JQError) { q('error({a: 1})') }
     assert_equal({ 'a' => 1 }, e.value)
     e = assert_raises(Rbjq::JQError) { q('.a', 1) }
-    assert_equal 'Cannot index number with string "a"', e.message
+    assert_equal 'Cannot index number with string ("a")', e.message
   end
 
   def test_try_does_not_catch_downstream_errors
@@ -45,9 +45,11 @@ class RbjqTest < Minitest::Test
     assert_equal [6765], q('def fib: if . < 2 then . else (. - 1 | fib) + (. - 2 | fib) end; 20 | fib')
   end
 
-  def test_large_integers_are_preserved
-    assert_equal '12345678901234567890', Rbjq.dump_json(q('.', Rbjq.parse_json('12345678901234567890')).first)
-    assert_equal ['9007199254740992'], q('9007199254740993 + 0').map { |v| Rbjq.dump_json(v) }
+  # like jq without decNumber, numbers are IEEE 754 doubles
+  def test_large_integers_are_doubles
+    assert_equal '12345678901234567000', Rbjq.dump_json(q('.', Rbjq.parse_json('12345678901234567890')).first)
+    assert_equal ['9007199254740992'], q('9007199254740993').map { |v| Rbjq.dump_json(v) }
+    assert_equal [false], q('have_decnum')
   end
 
   def test_number_formatting
@@ -79,9 +81,39 @@ class RbjqTest < Minitest::Test
     assert_equal [{ 'b' => { 'c' => 2 } }], q('pick(.b.c)', { 'a' => 1, 'b' => { 'c' => 2, 'd' => 3 } })
   end
 
+  Point = Struct.new(:x, :y)
+
+  def test_ruby_values_are_converted
+    assert_equal [{ 'x' => 1, 'y' => 'a' }], q('.', Point.new(1, :a))
+    assert_equal [[1, 2]], q('.', 1..2)
+    assert_equal ['2024-01-02'], q('.', Date.new(2024, 1, 2))
+    assert_equal [1], q('.', 1.0)
+    assert_equal [9_007_199_254_740_992.0], q('.', 9_007_199_254_740_993)
+  end
+
+  def test_scrub_utf8_like_jq
+    assert_equal "a�b", Rbjq::Value.scrub_utf8("a\xFFb")
+    assert_equal "�x", Rbjq::Value.scrub_utf8("\xE3\x81x")
+    assert_equal "é�", Rbjq::Value.scrub_utf8("é\xE3\x81")
+    assert_equal 'é', Rbjq::Value.scrub_utf8('é'.b)
+  end
+
+  def test_syntax_errors
+    ['def', 'def f(1): 1;', '1 == 2 == 3', '{(1):2}', '. as [] | 1', '"\\q"', '"\\(1', '"abc',
+     '{@base64: 1}', '[1,2', '1 +', 'reduce . as $x', 'if 1 then 2', '%'].each do |src|
+      assert_raises(Rbjq::CompileError, src) { Rbjq.compile(src) }
+    end
+    assert_equal [nil], q('')
+  end
+
+  def test_unsupported_modules
+    assert_raises(Rbjq::CompileError) { Rbjq.compile('import "a" as a; .') }
+    assert_raises(Rbjq::CompileError) { Rbjq.compile('include "a"; .') }
+  end
+
   def test_limit_is_lazy
     assert_equal [[0, 1, 2]], q('[limit(3; range(1e9))]')
-    assert_equal [[1, 2, 4, 8]], q('[limit(4; 1 | repeat(. * 2))]')
+    assert_equal [[2, 10, 2, 10]], q('[limit(4; 1 | repeat(. * 2, 10))]') # same as jq 1.7.1
   end
 
   def test_binop_operands_stay_lazy
@@ -162,7 +194,7 @@ class RbjqTest < Minitest::Test
   end
 
   def test_cli_error_location
-    assert_equal "rbjq: error (at <stdin>:2): Cannot index number with string \"a\"\n",
+    assert_equal "rbjq: error (at <stdin>:2): Cannot index number with string (\"a\")\n",
                  cli(['.a'], "{}\n1\n")[2]
     assert_match(/\(at <unknown>\)/, cli(['-n', '1 | .a'])[2])
   end
@@ -178,6 +210,6 @@ class RbjqTest < Minitest::Test
     assert_equal 4, cli(['-e', 'empty'], 'null')[0]
     assert_equal 5, cli(['error("x")'], 'null')[0]
     assert_equal 3, cli(['[1,'], 'null')[0]
-    assert_equal 2, cli(['.'], '{bad')[0]
+    assert_equal 5, cli(['.'], '{bad')[0] # jq 1.8: invalid input is exit status 5
   end
 end

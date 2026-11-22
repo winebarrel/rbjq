@@ -26,14 +26,14 @@ module Rbjq
       def normalize_value(v)
         case v
         when nil, true, false, String then v
-        when Integer then v
-        when Float then Value.normalize_number(v)
+        when Integer, Float then Value.normalize_number(v)
         when Symbol then v.to_s
         when Array then v.map { |e| normalize_value(e) }
         when Hash then v.each_with_object({}) { |(k, x), h| h[k.to_s] = normalize_value(x) }
+        when Struct then normalize_value(v.to_h)
         else
-          if v.respond_to?(:to_h) then normalize_value(v.to_h)
-          elsif v.respond_to?(:to_a) then normalize_value(v.to_a)
+          if v.respond_to?(:to_hash) then normalize_value(v.to_hash)
+          elsif v.is_a?(Enumerable) || v.respond_to?(:to_ary) then normalize_value(v.to_a)
           else v.to_s
           end
         end

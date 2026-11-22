@@ -117,10 +117,10 @@ module Rbjq
 
     def parse_number(s)
       if s.match?(/[.eE]/)
-        f = Float(s.start_with?('.') ? "0#{s}" : s.sub(/\.(?![0-9])/, '.0'))
+        f = Value.parse_float(s.start_with?('.') ? "0#{s}" : s.sub(/\.(?![0-9])/, '.0'))
         Value.normalize_number(f)
       else
-        Integer(s, 10)
+        Value.normalize_number(Integer(s, 10))
       end
     end
 

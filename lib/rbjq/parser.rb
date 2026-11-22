@@ -127,9 +127,20 @@ module Rbjq
     end
 
     def parse_comma
-      lhs = parse_alt
-      lhs = [:comma, lhs, parse_alt] while accept(:',')
+      lhs = parse_alt_as
+      lhs = [:comma, lhs, parse_alt_as] while accept(:',')
       lhs
+    end
+
+    # jq 1.8: the source of "as" is everything to its left down to "," or "|",
+    # e.g. `1 + 2 as $x | ...` binds 3. The body extends to the end of the pipe.
+    def parse_alt_as
+      src = parse_alt
+      return src unless accept(:as)
+
+      patterns = parse_patterns
+      expect(:|)
+      [:as, src, patterns, parse_pipe]
     end
 
     def parse_alt
@@ -237,12 +248,6 @@ module Rbjq
         when :'?'
           advance
           term = [:try, term, nil]
-        when :as
-          advance
-          patterns = parse_patterns
-          expect(:|)
-          body = parse_pipe
-          return [:as, term, patterns, body]
         else
           break
         end
@@ -332,12 +337,12 @@ module Rbjq
         parse_if
       when :try
         advance
-        body = parse_postfix_for_try
-        handler = accept(:catch) ? parse_postfix_for_try : nil
+        body = parse_postfix
+        handler = accept(:catch) ? parse_postfix : nil
         [:try, body, handler]
       when :reduce
         advance
-        src = parse_postfix_noas
+        src = parse_alt
         expect(:as)
         patterns = parse_patterns
         expect(:'(')
@@ -348,7 +353,7 @@ module Rbjq
         [:reduce, src, patterns, init, update]
       when :foreach
         advance
-        src = parse_postfix_noas
+        src = parse_alt
         expect(:as)
         patterns = parse_patterns
         expect(:'(')
@@ -394,42 +399,6 @@ module Rbjq
       else
         unexpected!
       end
-    end
-
-    # try body / catch body: a postfix term (binds tighter than binary operators)
-    def parse_postfix_for_try
-      parse_postfix_noas
-    end
-
-    # postfix term without trailing "as" binding (used for reduce/foreach sources)
-    def parse_postfix_noas
-      term = parse_primary
-      loop do
-        t = peek
-        case t.type
-        when :field
-          advance
-          term = [:index, term, [:literal, t.value]]
-        when :'.'
-          if peek(1).type == :str
-            advance
-            term = [:index, term, parse_string(advance, nil)]
-          elsif peek(1).type == :'['
-            advance
-            term = parse_bracket_suffix(term)
-          else
-            break
-          end
-        when :'['
-          term = parse_bracket_suffix(term)
-        when :'?'
-          advance
-          term = [:try, term, nil]
-        else
-          break
-        end
-      end
-      term
     end
 
     def parse_if
@@ -572,13 +541,12 @@ module Rbjq
       when :'['
         advance
         elems = []
-        unless accept(:']')
-          loop do
-            elems << parse_pattern
-            break unless accept(:',')
-          end
-          expect(:']')
+        unexpected! if peek.type == :']'
+        loop do
+          elems << parse_pattern
+          break unless accept(:',')
         end
+        expect(:']')
         [:parray, elems]
       when :'{'
         advance
