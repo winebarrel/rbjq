@@ -26,7 +26,7 @@ jobs:
       - run: bundle exec rake test
         env:
           COVERAGE: ${{ matrix.ruby == '4.0' && '1' || '' }}
-      - uses: codecov/codecov-action@v5
+      - uses: codecov/codecov-action@v7
         if: matrix.ruby == '4.0'
         with:
           files: coverage/coverage.xml
